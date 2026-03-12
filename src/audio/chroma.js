@@ -3,6 +3,7 @@
 // Writes directly to store.chromagram / store.chromagramSmooth.
 
 import { store, SPECTRUM_BINS } from '../store/feature-store.js';
+import { getSensitivity } from '../scene/layers/spectrum-wall.js';
 
 const NUM_CHROMA = 12;
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -34,6 +35,9 @@ const rawChroma = new Float64Array(NUM_CHROMA);
 export function updateChromagram(spectrumDb, sampleRate, fftSize) {
   const binHz = sampleRate / fftSize;
   const numBins = SPECTRUM_BINS;
+  // Sensitivity shifts the effective floor: higher sensitivity = detect quieter signals
+  const sens = getSensitivity();
+  const absFloor = -100 - sens; // bins below this absolute level are ignored
 
   rawChroma.fill(0);
 
@@ -46,6 +50,9 @@ export function updateChromagram(spectrumDb, sampleRate, fftSize) {
     for (let b = centerBin - 1; b <= centerBin + 1; b++) {
       if (spectrumDb[b] > peakDb) peakDb = spectrumDb[b];
     }
+
+    // Skip bins below effective floor (respects sensitivity slider)
+    if (peakDb < absFloor) continue;
 
     // Estimate local noise floor from nearby non-adjacent bins
     let noiseSum = 0;

@@ -142,6 +142,10 @@ export function setSensitivity(db) {
   sensitivity = db;
 }
 
+export function getSensitivity() {
+  return sensitivity;
+}
+
 export function setScrollSpeed(px) {
   scrollSpeed = Math.max(1, Math.min(20, px));
 }
