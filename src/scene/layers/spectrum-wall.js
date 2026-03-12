@@ -380,7 +380,7 @@ export function createSpectrumWall() {
   // ── Chord label state ──
   let prevChordName = '';
   let chordStableFrames = 0;
-  let lastChordDrawX = -Infinity;
+  let framesSinceChordDraw = 999;
 
   // Gaussian weight lookup for ±period window
   function btGaussWeight(dist, period) {
@@ -807,15 +807,17 @@ export function createSpectrumWall() {
       }
 
       // ── Chord label in harmonic strip ──
-      if (s.chordConfidence > 0.3 && s.chordName) {
+      framesSinceChordDraw++;
+      if (s.chordConfidence > 0.25 && s.chordName) {
         if (s.chordName === prevChordName) {
           chordStableFrames++;
         } else {
           chordStableFrames = 0;
           prevChordName = s.chordName;
         }
-        // Draw when stable (~170ms) and enough horizontal distance from last label
-        if (chordStableFrames >= 10 && (rightX - lastChordDrawX > CANVAS_W * 0.08)) {
+        // Draw when stable (~170ms) and enough scroll distance from last label
+        const minFramesBetween = Math.ceil(CANVAS_W * 0.08 / scrollSpeed);
+        if (chordStableFrames >= 10 && framesSinceChordDraw > minFramesBetween) {
           const chordFontSize = Math.round(CANVAS_H * 0.035);
           ctx.font = `bold ${chordFontSize}px sans-serif`;
           ctx.textAlign = 'center';
@@ -828,7 +830,7 @@ export function createSpectrumWall() {
           // White fill
           ctx.fillStyle = 'rgba(255,255,255,0.95)';
           ctx.fillText(s.chordName, rightX, cy);
-          lastChordDrawX = rightX;
+          framesSinceChordDraw = 0;
         }
       } else {
         chordStableFrames = 0;

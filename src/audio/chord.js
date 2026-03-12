@@ -86,17 +86,29 @@ export function detectChord(chromagram) {
 
   const best = profiles[bestIdx];
 
-  // Confidence: how much better best is vs second-best (0-1 range)
-  // If secondBest >> bestScore, confidence is high
+  // Confidence: combine ratio of best vs second-best with how well the
+  // chord template matches (energy in chord bins vs outside)
   let confidence = 0;
-  if (secondBest > 1e-8) {
-    confidence = Math.max(0, Math.min(1, 1 - bestScore / secondBest));
+  if (secondBest > 1e-8 && bestScore < secondBest) {
+    // Ratio component: how much better is best vs second-best
+    const ratio = 1 - bestScore / secondBest;
+    // Fit component: how much energy falls on chord tones vs off them
+    const { profile, numNotes } = profiles[bestIdx];
+    let onChord = 0, offChord = 0;
+    for (let i = 0; i < NUM_CHROMA; i++) {
+      if (profile[i] > 0.5) onChord += processed[i];
+      else offChord += processed[i];
+    }
+    const total = onChord + offChord;
+    const fit = total > 1e-8 ? onChord / total : 0;
+    // Combine: ratio gives discrimination, fit gives absolute quality
+    confidence = Math.min(1, ratio * 3) * 0.4 + fit * 0.6;
   }
 
-  // Also factor in overall chroma energy — no chord in silence
+  // Attenuate in near-silence (chromagram is normalized, so check raw sum)
   let totalEnergy = 0;
   for (let i = 0; i < NUM_CHROMA; i++) totalEnergy += chromagram[i];
-  if (totalEnergy < 0.5) confidence *= totalEnergy / 0.5;
+  if (totalEnergy < 1.0) confidence *= totalEnergy;
 
   const name = NOTE_NAMES[best.root] + best.suffix;
 

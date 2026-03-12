@@ -7,20 +7,26 @@ import { store, SPECTRUM_BINS } from '../store/feature-store.js';
 const NUM_CHROMA = 12;
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// Reference: C3 = 130.81 Hz (matches Stark's reference)
-const REF_FREQ = 130.81278265;
+// Precompute all note frequencies we care about:
+// C2 (~65Hz) through B6 (~1976Hz) for fundamentals,
+// plus harmonics 2 & 3 which can reach higher.
+// A4 = 440Hz, C4 = 261.63Hz, C2 = 65.41Hz
+// MIDI note 36 = C2, note number = 12 * octave + pitchClass
+// freq = 440 * 2^((midi - 69) / 12)
+const MIN_OCTAVE = 2;
+const MAX_OCTAVE = 6; // C2 through B6
 
-// Precompute note frequencies for 12 pitch classes (one octave starting at C3)
-const noteFrequencies = new Float64Array(NUM_CHROMA);
-for (let i = 0; i < NUM_CHROMA; i++) {
-  noteFrequencies[i] = REF_FREQ * Math.pow(2, i / 12);
+// Build a table of [pitchClass, frequency] for all notes we want to check
+const noteTable = [];
+for (let octave = MIN_OCTAVE; octave <= MAX_OCTAVE; octave++) {
+  for (let pc = 0; pc < NUM_CHROMA; pc++) {
+    const midi = 12 * (octave + 1) + pc; // C2=36 (octave+1 because MIDI octave -1 starts at 0)
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    noteTable.push({ pc, freq });
+  }
 }
 
-// Number of octaves to span above the reference octave
-const NUM_OCTAVES = 5; // C3 (~131Hz) through C7 (~4186Hz)
-// Number of harmonics to include per note
-const NUM_HARMONICS = 2;
-
+const NUM_HARMONICS = 3; // check fundamental + harmonics 2 & 3
 const rawChroma = new Float64Array(NUM_CHROMA);
 
 /**
@@ -32,33 +38,32 @@ const rawChroma = new Float64Array(NUM_CHROMA);
 export function updateChromagram(spectrumDb, sampleRate, fftSize) {
   const binHz = sampleRate / fftSize;
   const numBins = SPECTRUM_BINS;
-  // How many bins to search around expected frequency (±2 bins for peak finding)
-  const searchRadius = 2;
+  const nyquist = sampleRate / 2;
 
   rawChroma.fill(0);
 
-  for (let note = 0; note < NUM_CHROMA; note++) {
-    for (let octave = 1; octave <= NUM_OCTAVES; octave++) {
-      for (let harmonic = 1; harmonic <= NUM_HARMONICS; harmonic++) {
-        const freq = noteFrequencies[note] * octave * harmonic;
-        const centerBin = Math.round(freq / binHz);
+  for (const { pc, freq } of noteTable) {
+    for (let h = 1; h <= NUM_HARMONICS; h++) {
+      const hFreq = freq * h;
+      if (hFreq >= nyquist) break;
 
-        if (centerBin < 1 || centerBin >= numBins - 1) continue;
+      const centerBin = Math.round(hFreq / binHz);
+      if (centerBin < 1 || centerBin >= numBins - 1) continue;
 
-        // Find peak magnitude in search window (like Stark's approach)
-        const lo = Math.max(1, centerBin - searchRadius * harmonic);
-        const hi = Math.min(numBins - 1, centerBin + searchRadius * harmonic);
-        let maxDb = -150;
-        for (let b = lo; b <= hi; b++) {
-          if (spectrumDb[b] > maxDb) maxDb = spectrumDb[b];
-        }
+      // Search ±2 bins around expected position for peak
+      const lo = Math.max(1, centerBin - 2);
+      const hi = Math.min(numBins - 1, centerBin + 2);
+      let maxDb = -150;
+      for (let b = lo; b <= hi; b++) {
+        if (spectrumDb[b] > maxDb) maxDb = spectrumDb[b];
+      }
 
-        // Convert dB to linear power, then double-sqrt compression (Stark's method)
-        const power = Math.pow(10, maxDb / 20);
-        const compressed = Math.sqrt(Math.sqrt(power));
-
-        // Weight by 1/harmonic to emphasize fundamentals
-        rawChroma[note] += compressed / harmonic;
+      // Convert dB to linear amplitude, then double-sqrt compression (Stark's method)
+      // spectrumDb is from getFloatFrequencyData, values typically -150 to 0 dB
+      if (maxDb > -100) {
+        const amplitude = Math.pow(10, maxDb / 20);
+        const compressed = Math.sqrt(Math.sqrt(amplitude));
+        rawChroma[pc] += compressed / h;
       }
     }
   }
@@ -76,11 +81,11 @@ export function updateChromagram(spectrumDb, sampleRate, fftSize) {
     store.chromagram.fill(0);
   }
 
-  // Asymmetric EMA smoothing (fast attack, slow release)
+  // Asymmetric EMA smoothing (fast attack, moderate release)
   for (let i = 0; i < NUM_CHROMA; i++) {
     const raw = store.chromagram[i];
     const prev = store.chromagramSmooth[i];
-    const alpha = raw > prev ? 0.4 : 0.1;
+    const alpha = raw > prev ? 0.6 : 0.15;
     store.chromagramSmooth[i] = prev + alpha * (raw - prev);
   }
 }

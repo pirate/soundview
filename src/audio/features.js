@@ -351,7 +351,7 @@ export function updateFeatures() {
   // ══════════════════════════════════════════════════
   updateChromagram(fullFreqData, sampleRate, fullAnalyser.fftSize);
 
-  if (store.signalPresent && store.harmonicity > 0.15) {
+  if (store.signalPresent) {
     const chord = detectChord(store.chromagramSmooth);
     store.chordRoot = chord.root;
     store.chordQuality = chord.quality;
