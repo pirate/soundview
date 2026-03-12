@@ -808,6 +808,10 @@ export function createSpectrumWall() {
 
       // ── Chord label in harmonic strip ──
       framesSinceChordDraw++;
+      if (framesSinceChordDraw % 120 === 0) {
+        console.log('chord debug:', s.chordName, 'conf:', s.chordConfidence.toFixed(3),
+          'chroma:', Array.from(s.chromagramSmooth).map(v => v.toFixed(2)).join(','));
+      }
       if (s.chordConfidence > 0.25 && s.chordName) {
         if (s.chordName === prevChordName) {
           chordStableFrames++;
