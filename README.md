@@ -10,6 +10,14 @@ In theory one could learn to read the live visual display to "hear" and intepret
 
 **Background / Inspiration:** This [GPT-5.4 conversation](https://chatgpt.com/share/69b26006-a58c-8002-817b-08104eb92f4b) where I was asking about how human brains process sound.
 
+**Other Fun Toys to play with audio/signal processing:**
+- https://pypi.org/project/mac-hardware-toys
+- https://github.com/adamstark/BTrack
+- https://threejsdemos.com/demos/audio/visualizer
+- [YouTube | Real-Time 3D Audio Visualizer by Gabriel Dahl](https://www.youtube.com/watch?v=GbvyrPK2ulQ)
+- https://github.com/Andrew32A/digital-concert
+- https://github.com/Rudy9025/Rudys.ThreeJS.Audio.Visualizer
+
 ---
 
 ## What It Shows
@@ -39,7 +47,7 @@ Three rows of scattered pixels at the top, gated on aperiodic content only (supp
 Density and opacity scale with noise loudness. Color indicates noise spectral tilt.
 
 ### Beat Detection (blue vertical lines)
-BTrack-style beat tracker (Adam Stark, 2014):
+BTrack-style beat tracker ([Adam Stark, 2014](https://github.com/adamstark/BTrack)):
 1. Onset detection function from spectral flux feeds into a circular buffer
 2. Autocorrelation estimates tempo period (60-164 BPM range) with Rayleigh weighting
 3. Cumulative score array chains evidence backward by one beat period
