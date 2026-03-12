@@ -12,11 +12,13 @@ In theory one could learn to read the live visual display to "hear" and intepret
 
 **Other Fun Toys to play with audio/signal processing:**
 - https://pypi.org/project/mac-hardware-toys
-- https://github.com/adamstark/BTrack
+- https://www.adamstark.co.uk/research + https://github.com/adamstark/BTrack
 - https://threejsdemos.com/demos/audio/visualizer
 - [YouTube | Real-Time 3D Audio Visualizer by Gabriel Dahl](https://www.youtube.com/watch?v=GbvyrPK2ulQ)
 - https://github.com/Andrew32A/digital-concert
 - https://github.com/Rudy9025/Rudys.ThreeJS.Audio.Visualizer
+- https://tympanus.net/codrops/2025/06/18/coding-a-3d-audio-visualizer-with-three-js-gsap-web-audio-api/
+- https://github.com/adamstark/Chord-Detector-and-Chromagram
 
 ---
 
