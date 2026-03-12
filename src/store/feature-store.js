@@ -82,4 +82,14 @@ export const store = {
   // ── Spectral flux ──
   spectralFlux: 0,       // rate of spectral change (0-1)
   spectralFluxSmooth: 0,
+
+  // ── Chromagram + Chord detection ──
+  chromagram: new Float32Array(12),        // raw 12-bin chroma vector (C, C#, D, ..., B)
+  chromagramSmooth: new Float32Array(12),  // smoothed for detection/display
+  chromagramHistory: Array.from({ length: 64 }, () => new Float32Array(12)), // ring buffer for future key detection
+  chromagramHistoryIndex: 0,
+  chordRoot: -1,          // 0-11 (C=0, C#=1, ..., B=11), -1 = none
+  chordQuality: '',       // 'maj', 'min', 'dim', 'aug', 'sus2', 'sus4', 'maj7', 'min7', '7'
+  chordName: '',          // display string e.g. "Am", "C#dim"
+  chordConfidence: 0,     // 0-1
 };

@@ -6,6 +6,8 @@ import { bands } from './filterbank.js';
 import { detectPitch } from './pitch.js';
 import { updateModulation } from './modulation.js';
 import { initFormants, detectFormants } from './formants.js';
+import { updateChromagram } from './chroma.js';
+import { detectChord } from './chord.js';
 
 // ── Smoothing constants ──
 const SMOOTH_ATTACK = 0.3;
@@ -343,6 +345,25 @@ export function updateFeatures() {
       }
     }
   }
+
+  // ══════════════════════════════════════════════════
+  // 7b. CHROMAGRAM + CHORD DETECTION
+  // ══════════════════════════════════════════════════
+  updateChromagram(fullFreqData, sampleRate, fullAnalyser.fftSize);
+
+  if (store.signalPresent && store.harmonicity > 0.15) {
+    const chord = detectChord(store.chromagramSmooth);
+    store.chordRoot = chord.root;
+    store.chordQuality = chord.quality;
+    store.chordName = chord.name;
+    store.chordConfidence = chord.confidence;
+  } else {
+    store.chordConfidence = 0;
+  }
+
+  // Store chromagram snapshot for future key detection
+  store.chromagramHistory[store.chromagramHistoryIndex].set(store.chromagramSmooth);
+  store.chromagramHistoryIndex = (store.chromagramHistoryIndex + 1) % store.chromagramHistory.length;
 
   // ══════════════════════════════════════════════════
   // 8. MODULATION ESTIMATION
