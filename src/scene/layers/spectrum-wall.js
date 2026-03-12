@@ -355,7 +355,10 @@ export function createSpectrumWall() {
   let btIdx = 0;
   let btPeriod = 0;        // 0 = no tempo detected yet
   let btCounter = 999;     // won't fire until period is set
-  let btOdfEnergy = 0; // running average of ODF energy
+  let btOdfEnergy = 0;
+  let btConfirmedBeats = 0;  // consecutive beats with strong ODF at predicted time
+  let btShowBeats = false;   // only true after enough confirmed beats
+  let btSilenceTimer = 0;    // frames since last confirmed beat
   let btFrameCount = 0;
   let beatFlash = 0;
   let btBeatCount = 0;
@@ -923,14 +926,23 @@ export function createSpectrumWall() {
           }
         }
 
-        // Emit beat — only when ODF has real energy (not just noise floor)
-        if (bestScore > 0.01 && btPeriod > 0 && btOdfEnergy > 0.01) {
-          beatFlash = 5;
-          btLastBeatTime = time;
-          btBeatCount++;
-          if (btBeatCount % 10 === 0 && btPeriod > 0) {
-            btShowBpm = Math.round(3600 / btPeriod);
+        // Track whether this beat had real energy at the predicted time
+        const beatHadEnergy = bestScore > 0.01 && btOdfEnergy > 0.01;
+        if (beatHadEnergy && btPeriod > 0) {
+          btConfirmedBeats++;
+          btSilenceTimer = 0;
+          // Require 6+ consecutive confirmed beats before showing (~3-4 seconds of steady beat)
+          if (btConfirmedBeats >= 6) btShowBeats = true;
+          if (btShowBeats) {
+            beatFlash = 5;
+            btLastBeatTime = time;
+            btBeatCount++;
+            if (btBeatCount % 10 === 0) {
+              btShowBpm = Math.round(3600 / btPeriod);
+            }
           }
+        } else {
+          btConfirmedBeats = Math.max(0, btConfirmedBeats - 1);
         }
 
         // Reset counter: next beat expected in ~period frames
@@ -958,9 +970,19 @@ export function createSpectrumWall() {
         }
       }
 
-      // Draw blue vertical beat line — only if a beat was detected recently (within 3s)
-      const beatRecent = time - btLastBeatTime < 3;
-      if (beatFlash > 0 && beatRecent) {
+      // Hide beats after 10 seconds of no confirmed beats
+      btSilenceTimer++;
+      if (btShowBeats && btSilenceTimer > 600) { // ~10 seconds at 60fps
+        btShowBeats = false;
+        btConfirmedBeats = 0;
+        btBeatCount = 0;
+        btShowBpm = 0;
+        btPeriod = 0;
+        btCounter = 999;
+      }
+
+      // Draw blue vertical beat line — only when btShowBeats is true
+      if (beatFlash > 0 && btShowBeats) {
         beatFlash--;
         ctx.fillStyle = `rgba(60,140,255,${(beatFlash / 5) * 0.3})`;
         ctx.fillRect(rightX, 0, scrollSpeed, CANVAS_H);
@@ -971,10 +993,8 @@ export function createSpectrumWall() {
           ctx.fillText(`${btShowBpm}`, rightX - fontSize * 2, fontSize + 4);
           btShowBpm = 0;
         }
-      } else if (!beatRecent) {
+      } else if (!btShowBeats) {
         beatFlash = 0;
-        btShowBpm = 0;
-        btBeatCount = 0;
       }
 
       // Broadband transient — count how many cochleagram rows are "bright" this frame
