@@ -8,6 +8,8 @@ In theory one could learn to read the live visual display to "hear" and intepret
 
 <img width="3101" height="1735" alt="Screenshot 2026-03-12 at 3 49 24 PM" src="https://github.com/user-attachments/assets/351c893e-4f77-4f40-bfcd-395d5518fc0c" />
 
+**Background / Inspiration:** This [GPT-5.4 conversation](https://chatgpt.com/share/69b26006-a58c-8002-817b-08104eb92f4b) where I was asking about how human brains process sound.
+
 ---
 
 ## What It Shows
