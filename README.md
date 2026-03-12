@@ -8,17 +8,32 @@ In theory one could learn to read the live visual display to "hear" and intepret
 
 <img width="3101" height="1735" alt="Screenshot 2026-03-12 at 3 49 24 PM" src="https://github.com/user-attachments/assets/351c893e-4f77-4f40-bfcd-395d5518fc0c" />
 
-**Background / Inspiration:** This [GPT-5.4 conversation](https://chatgpt.com/share/69b26006-a58c-8002-817b-08104eb92f4b) where I was asking about how human brains process sound.
+**Background / Inspiration:** This [💬 GPT-5.4 conversation](https://chatgpt.com/share/69b26006-a58c-8002-817b-08104eb92f4b) where I was asking about how human brains process sound.
 
-**Other Fun Toys to play with audio/signal processing:**
-- https://pypi.org/project/mac-hardware-toys
-- https://www.adamstark.co.uk/research + https://github.com/adamstark/BTrack
+
+### Related Projects & Resources
+
+- ⭐️ https://pypi.org/project/mac-hardware-toys
+- ⭐️ https://github.com/Yuan-ManX/audio-development-tools
+- ⭐️ https://www.adamstark.co.uk/research + https://github.com/adamstark/BTrack
 - https://threejsdemos.com/demos/audio/visualizer
 - [YouTube | Real-Time 3D Audio Visualizer by Gabriel Dahl](https://www.youtube.com/watch?v=GbvyrPK2ulQ)
 - https://github.com/Andrew32A/digital-concert
 - https://github.com/Rudy9025/Rudys.ThreeJS.Audio.Visualizer
 - https://tympanus.net/codrops/2025/06/18/coding-a-3d-audio-visualizer-with-three-js-gsap-web-audio-api/
-- https://github.com/adamstark/Chord-Detector-and-Chromagram
+- https://github.com/adamstark/Chord-Detector-and-Chromagram + https://github.com/chinmaykrishnroy/dechord
+- https://github.com/aiXander/Realtime_PyAudio_FFT
+- https://github.com/qlemaire22/real-time-audio-analysis
+- https://github.com/magicat777/live-audio-analyzer
+- https://timbreandorchestration.org/writings/project-reports/real-time-timbral-analysis
+- ⭐️ https://cnmat.berkeley.edu/sites/default/files/attachments/2009_An_Exploration_of_Real-Time_Visualizations_of_Musical_Timbre.pdf
+- [Timbre Analysis of Music Audio Signals with Convolutional Neural Networks](https://arxiv.org/pdf/1703.06697)
+- https://ravinkumar.com/GenAiGuidebook/audio/audio_feature_extraction.html
+- https://www.mdpi.com/2079-9292/12/8/1791
+- https://transactions.ismir.net/articles/10.5334/tismir.198
+- https://devopedia.org/audio-feature-extraction
+- https://minimeters.app/
+- https://www.sonicvisualiser.org/doc/reference/5.0.1/en/
 
 ---
 
