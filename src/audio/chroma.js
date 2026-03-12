@@ -7,64 +7,66 @@ import { store, SPECTRUM_BINS } from '../store/feature-store.js';
 const NUM_CHROMA = 12;
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// Precompute all note frequencies we care about:
-// C2 (~65Hz) through B6 (~1976Hz) for fundamentals,
-// plus harmonics 2 & 3 which can reach higher.
-// A4 = 440Hz, C4 = 261.63Hz, C2 = 65.41Hz
-// MIDI note 36 = C2, note number = 12 * octave + pitchClass
-// freq = 440 * 2^((midi - 69) / 12)
+// Build note frequency table: C2 (~65Hz) through B5 (~988Hz)
+// This is the fundamental range — we only use 1 harmonic (fundamental)
+// to avoid cross-contamination between pitch classes.
+// 4 octaves × 12 notes = 48 entries
 const MIN_OCTAVE = 2;
-const MAX_OCTAVE = 6; // C2 through B6
+const MAX_OCTAVE = 5;
 
-// Build a table of [pitchClass, frequency] for all notes we want to check
 const noteTable = [];
 for (let octave = MIN_OCTAVE; octave <= MAX_OCTAVE; octave++) {
   for (let pc = 0; pc < NUM_CHROMA; pc++) {
-    const midi = 12 * (octave + 1) + pc; // C2=36 (octave+1 because MIDI octave -1 starts at 0)
+    const midi = 12 * (octave + 1) + pc;
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
     noteTable.push({ pc, freq });
   }
 }
 
-const NUM_HARMONICS = 3; // check fundamental + harmonics 2 & 3
 const rawChroma = new Float64Array(NUM_CHROMA);
 
 /**
  * Compute chromagram from the existing spectrumDb data.
- * @param {Float32Array} spectrumDb - dB magnitude spectrum (SPECTRUM_BINS long)
- * @param {number} sampleRate - audio sample rate (e.g. 44100)
- * @param {number} fftSize - FFT size (e.g. 8192)
+ * Uses peak-minus-noise approach: only count energy that sticks above
+ * the local spectral noise floor, so broadband noise doesn't wash out
+ * the pitch class distinctions.
  */
 export function updateChromagram(spectrumDb, sampleRate, fftSize) {
   const binHz = sampleRate / fftSize;
   const numBins = SPECTRUM_BINS;
-  const nyquist = sampleRate / 2;
 
   rawChroma.fill(0);
 
   for (const { pc, freq } of noteTable) {
-    for (let h = 1; h <= NUM_HARMONICS; h++) {
-      const hFreq = freq * h;
-      if (hFreq >= nyquist) break;
+    const centerBin = Math.round(freq / binHz);
+    if (centerBin < 5 || centerBin >= numBins - 5) continue;
 
-      const centerBin = Math.round(hFreq / binHz);
-      if (centerBin < 1 || centerBin >= numBins - 1) continue;
+    // Find peak in tight window (±1 bin) around expected note frequency
+    let peakDb = -150;
+    for (let b = centerBin - 1; b <= centerBin + 1; b++) {
+      if (spectrumDb[b] > peakDb) peakDb = spectrumDb[b];
+    }
 
-      // Search ±2 bins around expected position for peak
-      const lo = Math.max(1, centerBin - 2);
-      const hi = Math.min(numBins - 1, centerBin + 2);
-      let maxDb = -150;
-      for (let b = lo; b <= hi; b++) {
-        if (spectrumDb[b] > maxDb) maxDb = spectrumDb[b];
+    // Estimate local noise floor from nearby non-adjacent bins
+    let noiseSum = 0;
+    let noiseCnt = 0;
+    for (let b = centerBin - 5; b <= centerBin + 5; b++) {
+      if (b < 0 || b >= numBins) continue;
+      if (Math.abs(b - centerBin) >= 3) {  // skip ±2 bins around peak
+        noiseSum += spectrumDb[b];
+        noiseCnt++;
       }
+    }
+    const noiseFloor = noiseCnt > 0 ? noiseSum / noiseCnt : -100;
 
-      // Convert dB to linear amplitude, then double-sqrt compression (Stark's method)
-      // spectrumDb is from getFloatFrequencyData, values typically -150 to 0 dB
-      if (maxDb > -100) {
-        const amplitude = Math.pow(10, maxDb / 20);
-        const compressed = Math.sqrt(Math.sqrt(amplitude));
-        rawChroma[pc] += compressed / h;
-      }
+    // Prominence: how much the peak sticks above the noise floor (in dB)
+    const prominence = peakDb - noiseFloor;
+
+    // Only count peaks that are meaningfully above noise
+    if (prominence > 3) {  // at least 3 dB above noise
+      // Convert prominence to linear scale (preserves relative differences)
+      const energy = Math.pow(10, prominence / 20);
+      rawChroma[pc] += energy;
     }
   }
 
