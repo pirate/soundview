@@ -14,9 +14,10 @@ In theory one could learn to read the live visual display to "hear" and intepret
 ### Related Projects & Resources
 
 - ⭐️ https://pypi.org/project/mac-hardware-toys
-- ⭐️ https://github.com/Yuan-ManX/audio-development-tools
+- ⭐️ https://github.com/Yuan-ManX/audio-development-tools + https://github.com/BillyDM/awesome-audio-dsp
 - ⭐️ https://www.adamstark.co.uk/research + https://github.com/adamstark/BTrack
 - https://threejsdemos.com/demos/audio/visualizer
+- https://essentia.upf.edu/ + https://github.com/MTG/essentia.js
 - [YouTube | Real-Time 3D Audio Visualizer by Gabriel Dahl](https://www.youtube.com/watch?v=GbvyrPK2ulQ)
 - https://github.com/Andrew32A/digital-concert
 - https://github.com/Rudy9025/Rudys.ThreeJS.Audio.Visualizer
@@ -34,6 +35,12 @@ In theory one could learn to read the live visual display to "hear" and intepret
 - https://devopedia.org/audio-feature-extraction
 - https://minimeters.app/
 - https://www.sonicvisualiser.org/doc/reference/5.0.1/en/
+- https://github.com/deezer/spleeter
+- https://github.com/speechbrain/speechbrain
+- https://github.com/libAudioFlux/audioFlux
+- https://friture.org/features.html
+- https://github.com/ybayle/awesome-deep-learning-music/issues/5
+- https://github.com/BillyDM/awesome-audio-dsp/blob/main/sections/MORE_LISTS.md
 
 ---
 
