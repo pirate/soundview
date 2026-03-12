@@ -1,8 +1,14 @@
 # SoundView
 
-Real-time audio visualization that turns microphone input into a rich, multi-layered visual display. Designed to encode as much auditory information as possible into visual channels that humans can process intuitively.
+Real-time audio visualizer that turns microphone input into a rich, multi-layered visual display intended to mimic the human auditory processing system and the features it provides for free.
 
-**Live demo: https://pirate.github.io/soundview/**
+In theory one could learn to read the live visual display to "hear" and intepret speech, music, and other ambient sound using your eyes.
+
+**Live Site: https://pirate.github.io/soundview/**
+
+<img width="3101" height="1735" alt="Screenshot 2026-03-12 at 3 49 24 PM" src="https://github.com/user-attachments/assets/351c893e-4f77-4f40-bfcd-395d5518fc0c" />
+
+---
 
 ## What It Shows
 
@@ -11,7 +17,7 @@ A scrolling time-frequency display rendered at native Retina resolution. Each pi
 
 - **Vertical axis**: Frequency (50Hz at bottom, 16kHz at top), with a piecewise log scale that compresses the extremes and expands the 200-8000Hz speech/music range for maximum detail
 - **Color**: Thermal colormap from black (silent) through blue, cyan, green, yellow, orange, red to white (loud)
-- **Resolution**: FFT size 8192 gives ~5.4Hz per bin, with per-pixel rendering via ImageData (no fillRect overhead)
+- **Resolution**: FFT size 8192 gives ~5.4Hz per bin, with per-pixel rendering via ImageData
 - **Sensitivity**: Adjustable via slider, with perceptual gamma compression (0.35) and a noise gate to suppress mic self-noise
 
 ### Overlay Lines on Cochleagram
@@ -135,27 +141,30 @@ Also contains:
 - BTrack beat tracker
 - Noise fuzz renderer
 
-## Usage
+---
+
+## Development
 
 ```bash
 pnpm install
 pnpm dev
+
+# deploy:
+pnpm build
+npx gh-pages -d dist
 ```
 
 Click "click to start" to grant microphone access. Controls:
 - **sens**: Sensitivity offset in dB (shifts the brightness curve)
 - **speed**: Scroll speed in pixels per frame (1-20)
 
-## Tech Stack
+### Tech Stack
 
 - Vanilla JS (no framework)
 - Web Audio API (AnalyserNode, BiquadFilter, MediaStream)
 - Canvas 2D (ImageData for cochleagram, fillRect for features, arc for voice circles)
 - Vite for dev server and build
 
-## Deploy
+---
 
-```bash
-pnpm build
-npx gh-pages -d dist
-```
+MIT License
