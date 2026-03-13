@@ -1166,17 +1166,21 @@ export function createSpectrumWall() {
 
       // Compute cumulative score: current ODF + best weighted past score from ~1 period ago
       // Look backward in the score buffer around [period/2, 2*period] for max weighted score
-      const lookStart = Math.round(btPeriod * 0.5);
-      const lookEnd = Math.round(btPeriod * 2);
-      let maxWeighted = 0;
-      for (let i = lookStart; i <= lookEnd; i++) {
-        const pastIdx = (btIdx - i + BT_BUF_LEN) % BT_BUF_LEN;
-        const dist = Math.abs(i - Math.round(btPeriod));
-        const w = btGaussWeight(dist, btPeriod);
-        const val = btCumScore[pastIdx] * w;
-        if (val > maxWeighted) maxWeighted = val;
+      if (btPeriod > 0) {
+        const lookStart = Math.max(1, Math.round(btPeriod * 0.5));
+        const lookEnd = Math.round(btPeriod * 2);
+        let maxWeighted = 0;
+        for (let i = lookStart; i <= lookEnd; i++) {
+          const pastIdx = (btIdx - i + BT_BUF_LEN) % BT_BUF_LEN;
+          const dist = Math.abs(i - Math.round(btPeriod));
+          const w = btGaussWeight(dist, btPeriod);
+          const val = btCumScore[pastIdx] * w;
+          if (val > maxWeighted) maxWeighted = val;
+        }
+        btCumScore[btIdx] = odfVal + maxWeighted;
+      } else {
+        btCumScore[btIdx] = odfVal;
       }
-      btCumScore[btIdx] = odfVal + maxWeighted;
 
       btIdx = (btIdx + 1) % BT_BUF_LEN;
 
