@@ -1,0 +1,25 @@
+src/audio/features.js
+  8c859f06cf152c5f 44-45
+src/scene/layers/spectrum-wall.js
+  8c859f06cf152c5f 10-13,15-23,26-27,513-514,527,911
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "837e62547e0ea5cfab8da7f392a4f560829e8142",
+  "prompts": {
+    "8c859f06cf152c5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91f60580-2d87-4fda-a7e9-04991e905346",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>",
+      "messages": [],
+      "total_additions": 26,
+      "total_deletions": 14,
+      "accepted_lines": 21,
+      "overriden_lines": 0
+    }
+  }
+}
