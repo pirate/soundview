@@ -424,6 +424,7 @@ export function createSpectrumWall() {
   let prevDerivY = -1;
   let btTempoCounter = 0;
   let beatPulse = 0;  // smooth 0→1 pulse for beat indicator circle
+  let btPhaseAccuracy = 0;  // smoothed 0→1: how on-time beats land (1 = perfect)
 
   // ── MFCC adaptive normalization state ──
   const mfccMin = new Float32Array(13).fill(0);
@@ -1198,6 +1199,9 @@ export function createSpectrumWall() {
         if (beatHadEnergy && btPeriod > 0) {
           btConfirmedBeats++;
           btSilenceTimer = 0;
+          // Phase accuracy: bestOffset=0 means perfect, normalize by period
+          const phaseHit = 1 - Math.min(1, bestOffset / (btPeriod * 0.5));
+          btPhaseAccuracy = btPhaseAccuracy * 0.7 + phaseHit * 0.3;
           // Require 6+ consecutive confirmed beats before showing (~3-4 seconds of steady beat)
           if (btConfirmedBeats >= 6) btShowBeats = true;
           if (btShowBeats) {
@@ -1256,10 +1260,14 @@ export function createSpectrumWall() {
       beatPulse *= 0.88;
       if (beatPulse < 0.01) beatPulse = 0;
 
-      // Draw blue vertical beat line — only when btShowBeats is true
+      // Draw vertical beat line — color-coded by phase accuracy
       if (beatFlash > 0 && btShowBeats) {
         beatFlash--;
-        ctx.fillStyle = `rgba(60,140,255,${(beatFlash / 5) * 0.3})`;
+        const pa = btPhaseAccuracy;
+        const bR = Math.round(pa < 0.5 ? 255 : 255 * (1 - (pa - 0.5) * 2));
+        const bG = Math.round(pa < 0.5 ? pa * 2 * 180 : 80 + 175 * (pa - 0.5) * 2);
+        const bB = Math.round(20 * (1 - pa));
+        ctx.fillStyle = `rgba(${bR},${bG},${bB},${(beatFlash / 5) * 0.3})`;
         ctx.fillRect(rightX, 0, scrollSpeed, CANVAS_H);
         if (beatFlash === 4 && btShowBpm > 0) {
           const fontSize = Math.round(CANVAS_H * 0.018);
@@ -1345,44 +1353,39 @@ export function createSpectrumWall() {
       }
 
       // ── Beat indicator circle (upper-right sidebar) ──
-      if (btShowBeats && beatPulse > 0) {
-        const pad = Math.round(12 * DPR);
-        const circR = Math.round(8 * DPR);
+      // Color encodes phase accuracy: red = unstable, orange = locking, green = phase-locked
+      if (btShowBeats) {
+        const pad = Math.round(16 * DPR);
+        const circR = Math.round(14 * DPR);
         const bx = CANVAS_W - ARROW_W / 2;
         const by = pad + circR;
+        const pa = btPhaseAccuracy; // 0..1 phase accuracy
 
-        // Outer glow
-        const glowR = circR + Math.round(circR * beatPulse * 0.8);
-        oCtx.beginPath();
-        oCtx.arc(bx, by, glowR, 0, Math.PI * 2);
-        oCtx.fillStyle = `rgba(255,30,30,${beatPulse * 0.25})`;
-        oCtx.fill();
+        // Color: red(0) → orange(0.5) → green(1) based on phase accuracy
+        const cR = Math.round(pa < 0.5 ? 255 : 255 * (1 - (pa - 0.5) * 2));
+        const cG = Math.round(pa < 0.5 ? pa * 2 * 180 : 80 + 175 * (pa - 0.5) * 2);
+        const cB = Math.round(20 * (1 - pa));
 
-        // Main circle — scales slightly on beat
-        const scaleR = circR + Math.round(circR * beatPulse * 0.3);
-        oCtx.beginPath();
-        oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
-        const brightness = Math.round(120 + 135 * beatPulse);
-        oCtx.fillStyle = `rgb(${brightness},${Math.round(20 * (1 - beatPulse))},${Math.round(20 * (1 - beatPulse))})`;
-        oCtx.fill();
-
-        // Bright center on beat
-        if (beatPulse > 0.3) {
+        if (beatPulse > 0) {
+          // Glow fades out only (no grow animation — instant on, fade off)
           oCtx.beginPath();
-          oCtx.arc(bx, by, scaleR * 0.5, 0, Math.PI * 2);
-          oCtx.fillStyle = `rgba(255,200,200,${(beatPulse - 0.3) * 0.7})`;
+          oCtx.arc(bx, by, circR + Math.round(6 * DPR), 0, Math.PI * 2);
+          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${beatPulse * 0.3})`;
+          oCtx.fill();
+
+          // Main circle — fixed size, brightness fades down from full
+          oCtx.beginPath();
+          oCtx.arc(bx, by, circR, 0, Math.PI * 2);
+          const fade = beatPulse;
+          oCtx.fillStyle = `rgb(${Math.min(255, cR + Math.round((255 - cR) * fade))},${Math.min(255, cG + Math.round((255 - cG) * fade))},${Math.min(255, cB + Math.round((255 - cB) * fade))})`;
+          oCtx.fill();
+        } else {
+          // Dim idle circle — still shows confidence color
+          oCtx.beginPath();
+          oCtx.arc(bx, by, circR, 0, Math.PI * 2);
+          oCtx.fillStyle = `rgb(${cR >> 1},${cG >> 1},${cB >> 1})`;
           oCtx.fill();
         }
-      } else if (btShowBeats) {
-        // Dim idle circle when beats are active but between pulses
-        const pad = Math.round(12 * DPR);
-        const circR = Math.round(8 * DPR);
-        const bx = CANVAS_W - ARROW_W / 2;
-        const by = pad + circR;
-        oCtx.beginPath();
-        oCtx.arc(bx, by, circR, 0, Math.PI * 2);
-        oCtx.fillStyle = 'rgb(120,20,20)';
-        oCtx.fill();
       }
 
       // ── Circle of Fifths key overlay (bottom-left, above timbre map) ──
