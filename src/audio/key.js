@@ -1,5 +1,8 @@
-// Key detection using Krumhansl-Schmuckler algorithm.
-// Correlates accumulated chromagram distribution against major/minor key profiles.
+// Key detection using chord-weighted Krumhansl-Schmuckler algorithm.
+// Instead of correlating raw (noisy) chromagram, accumulates chord
+// observations into a pitch class histogram and correlates that.
+// This is much more accurate because chord detection already filters
+// spectral noise into discrete musical events.
 
 import { store } from '../store/feature-store.js';
 import { NOTE_NAMES } from './chroma.js';
@@ -8,18 +11,28 @@ import { NOTE_NAMES } from './chroma.js';
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
-// Long-term chroma accumulator with very slow decay
-const chromaAccum = new Float64Array(12);
-// ~10s half-life at 60fps: 0.5 = d^600, d = 0.5^(1/600) ≈ 0.99885
-const DECAY = 0.99885;
+// Chord interval definitions: which pitch classes each chord quality contributes
+const CHORD_INTERVALS = {
+  'maj':  [0, 4, 7],
+  'min':  [0, 3, 7],
+  'dim':  [0, 3, 6],
+  'aug':  [0, 4, 8],
+  'sus2': [0, 2, 7],
+  'sus4': [0, 5, 7],
+  'maj7': [0, 4, 7, 11],
+  'min7': [0, 3, 7, 10],
+  '7':    [0, 4, 7, 10],
+};
 
-// Per-key correlation scores, smoothed over time
+// Accumulated pitch class histogram from chord observations
+const chordChroma = new Float64Array(12);
+// ~15s half-life at 60fps: 0.5^(1/900) ≈ 0.99923
+const DECAY = 0.99923;
+
+// Smoothed per-key scores
 const keyScores = new Float64Array(24); // 0-11 major, 12-23 minor
-const SCORE_SMOOTH = 0.02; // very slow smoothing for score history
+const SCORE_SMOOTH = 0.015;
 
-/**
- * Correlate a chroma distribution with a key profile rotated to a given root.
- */
 function correlate(chroma, profile, root) {
   let sumX = 0, sumY = 0;
   for (let i = 0; i < 12; i++) {
@@ -41,32 +54,37 @@ function correlate(chroma, profile, root) {
   return den > 1e-12 ? num / den : 0;
 }
 
-/**
- * Update key detection from the current chromagram.
- * Call once per frame after chromagram is computed.
- */
 export function updateKeyDetection() {
-  const chroma = store.chromagramSmooth;
-
-  // Weight chromagram by signal energy so loud/clear notes matter more
-  const weight = store.signalPresent ? Math.min(1, store.rmsSmooth * 10) : 0;
-
-  // Accumulate weighted chroma (decay old, add energy-weighted new)
-  let hasEnergy = false;
+  // Decay old chord evidence
   for (let i = 0; i < 12; i++) {
-    chromaAccum[i] = chromaAccum[i] * DECAY + chroma[i] * weight;
-    if (chromaAccum[i] > 0.5) hasEnergy = true;
+    chordChroma[i] *= DECAY;
   }
 
-  if (!hasEnergy) {
-    store.keyConfidence *= 0.99; // slow fade rather than instant drop
+  // Add current chord observation to pitch class histogram
+  if (store.chordConfidence > 0.2 && store.chordRoot >= 0 && store.chordQuality) {
+    const intervals = CHORD_INTERVALS[store.chordQuality];
+    if (intervals) {
+      const w = store.chordConfidence;
+      // Root gets extra weight (it's the most important note for key inference)
+      chordChroma[store.chordRoot] += w * 2;
+      for (let k = 1; k < intervals.length; k++) {
+        chordChroma[(store.chordRoot + intervals[k]) % 12] += w;
+      }
+    }
+  }
+
+  // Check if we have enough accumulated evidence
+  let total = 0;
+  for (let i = 0; i < 12; i++) total += chordChroma[i];
+  if (total < 3) {
+    store.keyConfidence *= 0.99;
     return;
   }
 
-  // Test all 24 keys and smooth the scores over time
+  // Test all 24 keys, smooth scores
   for (let root = 0; root < 12; root++) {
-    const majCorr = correlate(chromaAccum, MAJOR_PROFILE, root);
-    const minCorr = correlate(chromaAccum, MINOR_PROFILE, root);
+    const majCorr = correlate(chordChroma, MAJOR_PROFILE, root);
+    const minCorr = correlate(chordChroma, MINOR_PROFILE, root);
     keyScores[root] += SCORE_SMOOTH * (majCorr - keyScores[root]);
     keyScores[12 + root] += SCORE_SMOOTH * (minCorr - keyScores[12 + root]);
   }
@@ -83,19 +101,19 @@ export function updateKeyDetection() {
 
   const bestRoot = bestIdx % 12;
   const bestMode = bestIdx < 12 ? 'maj' : 'min';
-  const confidence = Math.max(0, Math.min(1, (bestScore - 0.2) / 0.5));
+  const confidence = Math.max(0, Math.min(1, (bestScore - 0.1) / 0.6));
   const candidateName = NOTE_NAMES[bestRoot] + (bestMode === 'min' ? 'm' : '');
 
-  // Hysteresis: require the new key to beat the current key's score
-  // by a significant margin before switching
-  if (store.keyName && candidateName !== store.keyName) {
+  // Hysteresis: new key must beat current by significant margin
+  if (store.keyName && candidateName !== store.keyName && store.keyRoot >= 0) {
     const curIdx = store.keyRoot + (store.keyMode === 'min' ? 12 : 0);
-    const margin = keyScores[bestIdx] - keyScores[curIdx];
-    // Need >0.05 correlation advantage to switch keys
-    if (margin < 0.05) return;
+    if (curIdx < 24) {
+      const margin = keyScores[bestIdx] - keyScores[curIdx];
+      if (margin < 0.08) return;
+    }
   }
 
-  if (confidence > 0.15) {
+  if (confidence > 0.1) {
     store.keyRoot = bestRoot;
     store.keyMode = bestMode;
     store.keyName = candidateName;
