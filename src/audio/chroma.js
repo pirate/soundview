@@ -97,14 +97,15 @@ export function updateChroma() {
     detectChord();
   }
 
-  // Debug: log chroma state every 60 frames
+  // Debug: log chroma state every 120 frames (always, regardless of signal)
   if (typeof updateChroma._dbg === 'undefined') updateChroma._dbg = 0;
-  if (++updateChroma._dbg % 60 === 0 && store.signalPresent) {
+  if (++updateChroma._dbg % 120 === 0) {
     const chromaStr = Array.from(store.chroma).map(v => v.toFixed(2)).join(',');
-    console.log('chroma:', chromaStr,
+    console.log('CHROMA-DBG chroma:', chromaStr,
       '| key:', store.detectedKey, 'conf:', store.detectedKeyConfidence.toFixed(3),
       '| chord:', store.detectedChord, 'conf:', store.detectedChordConfidence.toFixed(3),
-      '| signal:', store.signalPresent, 'aboveNoise:', store.signalAboveNoise.toFixed(1));
+      '| signal:', store.signalPresent, 'rms:', store.rms.toFixed(5),
+      '| aboveNoise:', store.signalAboveNoise.toFixed(1));
   }
 }
 
