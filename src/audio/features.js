@@ -443,14 +443,21 @@ export function updateFeatures() {
   // ══════════════════════════════════════════════════
   updateTimbre();
 
-  // Reset key/chord detector state during silence so stale detections
-  // don't bleed through when signal returns
+  // Reset key/chord detector state after sustained silence (~2s at 60fps)
+  // so stale detections don't bleed through when signal returns.
+  // Brief gaps (common with browser audio) should NOT nuke the accumulator
+  // since it takes hundreds of frames to rebuild key detection state.
   if (!store.signalPresent) {
-    resetChroma();
-    store.detectedKey = '';
-    store.detectedKeyConfidence = 0;
+    store._silenceFrames = (store._silenceFrames || 0) + 1;
+    if (store._silenceFrames > 120) {
+      resetChroma();
+      store.detectedKey = '';
+      store.detectedKeyConfidence = 0;
+    }
     store.detectedChord = '';
     store.detectedChordConfidence = 0;
+  } else {
+    store._silenceFrames = 0;
   }
 
   // ══════════════════════════════════════════════════

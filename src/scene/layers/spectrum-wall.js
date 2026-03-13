@@ -441,6 +441,7 @@ export function createSpectrumWall() {
   // ── Key/chord display smoothing ──
   let displayKey = '';
   let displayChord = '';
+  let pendingChord = '';
   let keyHoldFrames = 0;
   let chordHoldFrames = 0;
 
@@ -939,34 +940,46 @@ export function createSpectrumWall() {
         ctx.fillRect(rightX, yBot - 1, scrollSpeed, 1);
       }
 
-      // Key + chord hold smoothing (for Circle of Fifths overlay)
-      // Clear cached display values when signal/confidence drops so stale
-      // detections don't persist through silence into the next signal.
+      // Key + chord display smoothing
+      // Use a voting window: track how many frames each candidate has been
+      // seen recently, then display the one with the most votes. This is
+      // robust to flickering detection (which resets consecutive-frame counters).
       if (!s.signalPresent) {
         displayKey = '';
         displayChord = '';
         keyHoldFrames = 0;
         chordHoldFrames = 0;
       } else {
-        if (s.detectedKeyConfidence > 0.3) {
-          if (s.detectedKey !== displayKey) {
-            keyHoldFrames++;
-            if (keyHoldFrames > 30) {
-              displayKey = s.detectedKey;
-              keyHoldFrames = 0;
-            }
-          } else {
-            keyHoldFrames = 0;
-          }
+        // Key: update on confidence, use accumulator (already smoothed in chroma.js)
+        if (s.detectedKeyConfidence > 0.3 && s.detectedKey) {
+          displayKey = s.detectedKey;
         }
-        if (s.detectedChordConfidence > 0.5) {
-          if (s.detectedChord !== displayChord) {
+
+        // Chord: require a few consecutive frames to switch, but don't
+        // reset the counter when detection flickers — only reset when a
+        // *different* non-empty chord appears consistently.
+        if (s.detectedChord && s.detectedChordConfidence > 0.3) {
+          if (s.detectedChord === displayChord) {
+            // Current display is confirmed — keep it
+            chordHoldFrames = 0;
+          } else if (s.detectedChord === pendingChord) {
+            // Same new candidate seen again
             chordHoldFrames++;
-            if (chordHoldFrames > 10) {
-              displayChord = s.detectedChord;
+            if (chordHoldFrames > 8) {
+              displayChord = pendingChord;
               chordHoldFrames = 0;
             }
           } else {
+            // New candidate appeared — start counting
+            pendingChord = s.detectedChord;
+            chordHoldFrames = 1;
+          }
+        }
+        // Clear display chord after sustained no-detection (~0.5s)
+        if (!s.detectedChord || s.detectedChordConfidence < 0.1) {
+          chordHoldFrames++;
+          if (chordHoldFrames > 30) {
+            displayChord = '';
             chordHoldFrames = 0;
           }
         }

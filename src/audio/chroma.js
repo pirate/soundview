@@ -26,17 +26,23 @@ const CHORD_TYPES = [
 let sampleRate = 44100;
 let fftSize = 8192;
 let keyFrameCounter = 0;
+let silenceFrames = 0; // consecutive frames without signal
 const keyAccum = new Float32Array(24); // smoothed correlations for 12 major + 12 minor
+
+// Spectral whitening: local median buffer (reused each frame)
+const WHITEN_HALF = 8; // ±8 bins (~43Hz window at 5.4Hz/bin)
 
 export function initChroma(sr, fft) {
   sampleRate = sr;
   fftSize = fft;
 }
 
-// Reset accumulated key/chord state so stale detections don't bleed across silence gaps
+// Reset accumulated key/chord state so stale detections don't bleed across silence gaps.
+// Called from features.js after sustained silence (not on every silent frame).
 export function resetChroma() {
   keyAccum.fill(0);
   keyFrameCounter = 0;
+  silenceFrames = 0;
   store.chroma.fill(0);
 }
 
@@ -49,20 +55,31 @@ export function updateChroma() {
   const minBin = Math.max(1, Math.floor(60 / binHz));
   const maxBin = Math.min(numBins - 1, Math.floor(5000 / binHz));
 
+  // Spectral whitening: subtract local median so broadband energy (drums)
+  // becomes ~0 while tonal peaks (pitched instruments) are preserved.
+  // This is more robust than hard peak-picking which can reject real peaks
+  // that span multiple FFT bins.
   for (let i = minBin; i <= maxBin; i++) {
     if (store.spectrumDb[i] < -90) continue; // noise gate
 
-    // Only fold spectral peaks (local maxima) into chroma.
-    // Tonal content (piano, bass, synth) creates sharp peaks in the FFT;
-    // percussive content (kicks, hats, snares) creates broad flat energy.
-    // By requiring a bin to exceed both neighbors by ≥3dB, we reject
-    // broadband drum energy that would otherwise flood all 12 pitch classes.
-    const left = i > minBin ? store.spectrumDb[i - 1] : -150;
-    const right = i < maxBin ? store.spectrumDb[i + 1] : -150;
-    if (store.spectrumDb[i] < left + 3 || store.spectrumDb[i] < right + 3) continue;
+    // Compute local median over ±WHITEN_HALF bins
+    const lo = Math.max(minBin, i - WHITEN_HALF);
+    const hi = Math.min(maxBin, i + WHITEN_HALF);
+    let localSum = 0;
+    let localCount = 0;
+    for (let j = lo; j <= hi; j++) {
+      localSum += store.spectrumDb[j];
+      localCount++;
+    }
+    const localMean = localSum / localCount;
+
+    // Only fold energy that exceeds the local floor by ≥3dB (tonal prominence)
+    const prominence = store.spectrumDb[i] - localMean;
+    if (prominence < 3) continue;
 
     const freq = i * binHz;
-    const power = Math.pow(10, store.spectrumDb[i] / 10);
+    // Use prominence-weighted power so strong peaks contribute more
+    const power = Math.pow(10, prominence / 10);
 
     // MIDI note → pitch class (0=C, 1=C#, ..., 11=B)
     const midi = 12 * Math.log2(freq / 440) + 69;
