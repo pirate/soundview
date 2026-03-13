@@ -7,14 +7,24 @@ import { SPECTRUM_BINS, NUM_BANDS, store as featureStore } from '../../store/fea
 // ── Multi-voice pitch detection (subharmonic summation) ──
 const MAX_VOICES = 4;
 
+// Pre-allocated buffer initialized lazily after constants are defined
+let _dmpScores = null;
+let _dmpBinHz, _dmpMinBin, _dmpMaxBin;
+
 function detectMultiPitch(spectrumDb, sampleRate, fftSize) {
-  const binHz = sampleRate / fftSize;
-  const minF0 = 60, maxF0 = 2000;
-  const minBin = Math.floor(minF0 / binHz);
-  const maxBin = Math.min(Math.floor(maxF0 / binHz), SPECTRUM_BINS - 1);
+  if (!_dmpScores) {
+    _dmpBinHz = SAMPLE_RATE / FFT_SIZE;
+    _dmpMinBin = Math.floor(60 / _dmpBinHz);
+    _dmpMaxBin = Math.min(Math.floor(2000 / _dmpBinHz), SPECTRUM_BINS - 1);
+    _dmpScores = new Float32Array(_dmpMaxBin + 1);
+  }
+  const binHz = _dmpBinHz;
+  const minBin = _dmpMinBin;
+  const maxBin = _dmpMaxBin;
   const numHarmonics = 8;
 
-  const scores = new Float32Array(maxBin + 1);
+  const scores = _dmpScores;
+  scores.fill(0);
 
   for (let b = minBin; b <= maxBin; b++) {
     let sum = 0;
@@ -500,6 +510,8 @@ export function createSpectrumWall() {
   // Track previous harmonic amplitudes for temporal derivative
   const prevHarmAmps = new Float32Array(HARM_ROWS);
   const prevGamma = new Float32Array(NUM_FREQ_ROWS);
+  const curGamma = new Float32Array(NUM_FREQ_ROWS);
+  const chordNotes = new Uint8Array(12);
 
   return {
     mesh: null,
@@ -512,7 +524,7 @@ export function createSpectrumWall() {
       const s = storeRef;
 
       // ── Cochleagram via ImageData (pixel-perfect, no fillRect overhead) ──
-      const curGamma = new Float32Array(NUM_FREQ_ROWS);
+      curGamma.fill(0);
       for (let r = 0; r < NUM_FREQ_ROWS; r++) {
         const bin = Math.min(SPECTRUM_BINS - 1, rowBins[r]);
         const raw = (spectrum[bin] + sensitivity - DB_FLOOR) / DB_RANGE;
@@ -896,7 +908,7 @@ export function createSpectrumWall() {
 
       // ── MIDI note view (12 rows — scrolling piano roll of detected chord notes) ──
       // Parse chord to get active pitch classes
-      const chordNotes = new Uint8Array(12); // 1 = chord tone, 0 = not
+      chordNotes.fill(0);
       if (s.signalPresent && s.detectedChordConfidence > 0.4 && displayChord) {
         // Find root note index
         let rootIdx = -1;
