@@ -462,15 +462,23 @@ export function createSpectrumWall() {
         const b = (a - lag + BT_BUF_LEN) % BT_BUF_LEN;
         corr += btOdf[a] * btOdf[b];
       }
-      // Very mild weighting: suppress extremes of the lag range
-      const t = (lag - BT_MIN_LAG) / (BT_MAX_LAG - BT_MIN_LAG);
-      corr *= 0.5 + 0.5 * Math.sin(t * Math.PI);
       btACorrBuf[lag] = corr;
     }
     // Find integer peak
     let bestLag = BT_MIN_LAG;
     for (let lag = BT_MIN_LAG + 1; lag <= BT_MAX_LAG; lag++) {
       if (btACorrBuf[lag] > btACorrBuf[bestLag]) bestLag = lag;
+    }
+    // Octave resolution: if half-lag is in range and is a genuine local peak, prefer faster tempo
+    const halfLag = Math.round(bestLag / 2);
+    if (halfLag >= BT_MIN_LAG + 2 && halfLag <= BT_MAX_LAG - 2) {
+      // Verify half-lag is actually a local peak (not just boundary noise)
+      const isLocalPeak = btACorrBuf[halfLag] > btACorrBuf[halfLag - 1] &&
+                          btACorrBuf[halfLag] > btACorrBuf[halfLag + 1];
+      // Require it to be a local peak AND at least 75% as strong
+      if (isLocalPeak && btACorrBuf[halfLag] > btACorrBuf[bestLag] * 0.75) {
+        bestLag = halfLag;
+      }
     }
     // Parabolic interpolation for sub-frame precision
     if (bestLag > BT_MIN_LAG && bestLag < BT_MAX_LAG) {
