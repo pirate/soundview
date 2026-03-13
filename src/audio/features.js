@@ -41,8 +41,8 @@ export function initFeatures(analyser, sr) {
   fullTimeDomain = new Float32Array(analyser.fftSize);
   fullFreqData = new Float32Array(analyser.frequencyBinCount);
 
-  // Initialize noise floor low so signalPresent triggers immediately on any input
-  store.noiseFloor = 1e-5;
+  // Initialize noise floor high so it adapts down
+  store.noiseFloor = 0.01;
 
   initFormants(sr, analyser.fftSize);
   initChroma(sr, analyser.fftSize);
