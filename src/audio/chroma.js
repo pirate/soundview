@@ -51,6 +51,16 @@ export function updateChroma() {
 
   for (let i = minBin; i <= maxBin; i++) {
     if (store.spectrumDb[i] < -90) continue; // noise gate
+
+    // Only fold spectral peaks (local maxima) into chroma.
+    // Tonal content (piano, bass, synth) creates sharp peaks in the FFT;
+    // percussive content (kicks, hats, snares) creates broad flat energy.
+    // By requiring a bin to exceed both neighbors by ≥3dB, we reject
+    // broadband drum energy that would otherwise flood all 12 pitch classes.
+    const left = i > minBin ? store.spectrumDb[i - 1] : -150;
+    const right = i < maxBin ? store.spectrumDb[i + 1] : -150;
+    if (store.spectrumDb[i] < left + 3 || store.spectrumDb[i] < right + 3) continue;
+
     const freq = i * binHz;
     const power = Math.pow(10, store.spectrumDb[i] / 10);
 
