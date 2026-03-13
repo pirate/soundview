@@ -70,16 +70,25 @@ const CANVAS_H = Math.round(window.innerHeight * DPR);
 const ARROW_W = Math.round(90 * DPR); // reserved for voice arrows on right
 const SCROLL_W = CANVAS_W - ARROW_W;  // scrolling area stops before arrows
 const FREQ_ROW_PX = 1;
-// Use ~60% of canvas height for cochleagram, rest for harmonics + features
-const COCHLEA_H = Math.round(CANVAS_H * 0.60);
+// Layout: cochleagram → harmonics → chroma → features → mfcc (+ timbre overlay)
+const COCHLEA_H = Math.round(CANVAS_H * 0.48);
 const NUM_FREQ_ROWS = COCHLEA_H; // 1 row per pixel
 const HARM_ROWS = 32;
 const HARM_MAX = 16; // only display first 16 harmonics, spread across 32 rows
-const HARM_H = Math.round(CANVAS_H * 0.25); // ~25% for harmonics
+const HARM_H = Math.round(CANVAS_H * 0.17);
 const HARM_ROW_PX = Math.round(HARM_H / HARM_ROWS);
-const HARM_Y = COCHLEA_H; // starts right after cochleagram
-const FEAT_ROW_PX = Math.round((CANVAS_H - COCHLEA_H - HARM_H) / 15); // ~20% for 15 feature rows
-const FEAT_Y = HARM_Y + HARM_H; // feature strip starts after harmonic strip
+const HARM_Y = COCHLEA_H;
+const CHROMA_ROWS = 12;
+const CHROMA_H = Math.round(CANVAS_H * 0.07);
+const CHROMA_ROW_PX = Math.round(CHROMA_H / CHROMA_ROWS);
+const CHROMA_Y = HARM_Y + HARM_H;
+const MFCC_ROWS = 13;
+const MFCC_H = Math.round(CANVAS_H * 0.08);
+const MFCC_ROW_PX = Math.round(MFCC_H / MFCC_ROWS);
+const FEAT_H = CANVAS_H - COCHLEA_H - HARM_H - CHROMA_H - MFCC_H;
+const FEAT_ROW_PX = Math.round(FEAT_H / 8);
+const FEAT_Y = CHROMA_Y + CHROMA_H;
+const MFCC_Y = FEAT_Y + FEAT_H;
 
 const FREQ_LO = 50;
 const FREQ_HI = 16000;
@@ -181,6 +190,27 @@ for (let i = 0; i < 256; i++) {
   cmapLUT[i * 3 + 1] = Math.round(lo[2] + (hi[2] - lo[2]) * f);
   cmapLUT[i * 3 + 2] = Math.round(lo[3] + (hi[3] - lo[3]) * f);
 }
+
+// ── Chroma pitch-class colors (one hue per semitone, cycling the color wheel) ──
+const CHROMA_COLORS = [
+  [255, 60, 60],    // C  - red
+  [255, 130, 40],   // C# - orange
+  [240, 200, 40],   // D  - yellow
+  [160, 230, 50],   // D# - yellow-green
+  [60, 210, 70],    // E  - green
+  [40, 200, 150],   // F  - teal
+  [40, 180, 220],   // F# - cyan
+  [60, 120, 240],   // G  - blue
+  [110, 70, 230],   // G# - indigo
+  [170, 60, 220],   // A  - purple
+  [220, 60, 180],   // A# - magenta
+  [240, 60, 120],   // B  - pink
+];
+const NOTE_LABELS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+// ── Timbre space constants ──
+const TIMBRE_SZ = Math.round(Math.min(CANVAS_H * 0.09, CANVAS_W * 0.10));
+const TRAIL_LEN = 120; // 2 seconds at 60fps
 
 // Band thresholds for energy ratio features
 const HIGH_FREQ_BAND = 19; // ~3kHz with 28 bands from 30-20kHz
@@ -309,6 +339,13 @@ function buildLabels() {
   h16Label.style.left = '38px';
   container.appendChild(h16Label);
 
+  // Chroma strip label
+  const chromaLabel = document.createElement('span');
+  chromaLabel.className = 'spec-label feat-label';
+  chromaLabel.textContent = 'chroma';
+  chromaLabel.style.top = `${((CHROMA_Y + CHROMA_H / 2) / CANVAS_H) * 100}%`;
+  container.appendChild(chromaLabel);
+
   // Feature row labels
   const featLabels = [
     'E/flux/sprd', '', '', 'top freq', '', '', '', '',
@@ -322,6 +359,13 @@ function buildLabels() {
     label.style.top = `${pct}%`;
     container.appendChild(label);
   }
+
+  // MFCC strip label
+  const mfccLabel = document.createElement('span');
+  mfccLabel.className = 'spec-label feat-label';
+  mfccLabel.textContent = 'mfcc';
+  mfccLabel.style.top = `${((MFCC_Y + MFCC_H / 2) / CANVAS_H) * 100}%`;
+  container.appendChild(mfccLabel);
 }
 
 export function createSpectrumWall() {
@@ -376,6 +420,23 @@ export function createSpectrumWall() {
   let prevFluxY = -1;
   let prevDerivY = -1;
   let btTempoCounter = 0;
+
+  // ── MFCC adaptive normalization state ──
+  const mfccMin = new Float32Array(13).fill(0);
+  const mfccMax = new Float32Array(13).fill(1);
+  let mfccInitFrames = 0;
+
+  // ── Timbre space trail ──
+  const timbreTrailX = new Float32Array(TRAIL_LEN);
+  const timbreTrailY = new Float32Array(TRAIL_LEN);
+  let trailIdx = 0;
+  let trailCount = 0;
+
+  // ── Key/chord display smoothing ──
+  let displayKey = '';
+  let displayChord = '';
+  let keyHoldFrames = 0;
+  let chordHoldFrames = 0;
 
   // Gaussian weight lookup for ±period window
   function btGaussWeight(dist, period) {
@@ -801,7 +862,58 @@ export function createSpectrumWall() {
         prevDomY = -1;
       }
 
-      // ── Feature strip (16 rows × 15px) ──
+      // ── Chroma strip (12 rows — one per pitch class, C at bottom, B at top) ──
+      for (let row = 0; row < CHROMA_ROWS; row++) {
+        const energy = s.chroma[row]; // 0-1 normalized
+        const [cR, cG, cB] = CHROMA_COLORS[row];
+        // Gamma-compress energy for visibility of quiet notes
+        const v = Math.pow(Math.max(0, energy), 0.5);
+        const r = Math.round(cR * v);
+        const g = Math.round(cG * v);
+        const b = Math.round(cB * v);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        // row 0 (C) at bottom, row 11 (B) at top
+        const yTop = CHROMA_Y + Math.round((CHROMA_ROWS - 1 - row) / CHROMA_ROWS * CHROMA_H);
+        const yBot = CHROMA_Y + Math.round((CHROMA_ROWS - row) / CHROMA_ROWS * CHROMA_H);
+        ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
+      }
+
+      // Key + chord text overlay (on right edge, over chroma strip)
+      if (s.signalPresent && s.detectedKeyConfidence > 0.3) {
+        if (s.detectedKey !== displayKey) {
+          keyHoldFrames++;
+          if (keyHoldFrames > 30) { // hold 0.5s before updating
+            displayKey = s.detectedKey;
+            keyHoldFrames = 0;
+          }
+        } else {
+          keyHoldFrames = 0;
+        }
+      }
+      if (s.signalPresent && s.detectedChordConfidence > 0.5) {
+        if (s.detectedChord !== displayChord) {
+          chordHoldFrames++;
+          if (chordHoldFrames > 10) { // faster chord updates
+            displayChord = s.detectedChord;
+            chordHoldFrames = 0;
+          }
+        } else {
+          chordHoldFrames = 0;
+        }
+      }
+      // Draw key/chord text every ~60 frames to avoid visual noise
+      if (displayKey && btFrameCount % 60 === 0) {
+        const fontSize = Math.round(CHROMA_H * 0.35);
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillText(displayKey, rightX - fontSize * 4.5, CHROMA_Y + fontSize + 2);
+        if (displayChord) {
+          ctx.fillStyle = 'rgba(255,255,200,0.75)';
+          ctx.fillText(displayChord, rightX - fontSize * 4.5, CHROMA_Y + fontSize * 2 + 4);
+        }
+      }
+
+      // ── Feature strip (8 rows) ──
       // No signalPresent gating — each feature stands on its own values.
       const fY = FEAT_Y;
 
@@ -887,6 +999,55 @@ export function createSpectrumWall() {
           ctx.fillRect(rightX, Math.round(ty) - 1, scrollSpeed, 3);
         }
 
+      }
+
+      // ── MFCC strip (13 rows — MFCC[0] at bottom, MFCC[12] at top) ──
+      // Adaptive normalization: track running min/max per coefficient
+      mfccInitFrames++;
+      for (let k = 0; k < 13; k++) {
+        const v = s.mfcc[k];
+        if (mfccInitFrames < 30) {
+          // Bootstrap: expand range quickly
+          mfccMin[k] = Math.min(mfccMin[k], v);
+          mfccMax[k] = Math.max(mfccMax[k], v);
+        } else {
+          // Slow adaptation
+          mfccMin[k] += 0.002 * (v - mfccMin[k]);
+          mfccMax[k] -= 0.002 * (mfccMax[k] - v);
+          mfccMin[k] = Math.min(mfccMin[k], v);
+          mfccMax[k] = Math.max(mfccMax[k], v);
+        }
+      }
+
+      for (let row = 0; row < MFCC_ROWS; row++) {
+        const range = mfccMax[row] - mfccMin[row];
+        // Normalize to [-1, 1] centered on midpoint
+        let norm = 0;
+        if (range > 1e-6) {
+          const mid2 = (mfccMax[row] + mfccMin[row]) / 2;
+          norm = (s.mfcc[row] - mid2) / (range / 2);
+          norm = Math.max(-1, Math.min(1, norm));
+        }
+
+        // Diverging colormap: blue (negative) → dark → orange (positive)
+        let mr, mg, mb;
+        if (norm < 0) {
+          const t = Math.min(1, -norm);
+          mr = Math.round(15 * (1 - t));
+          mg = Math.round(40 * t + 15 * (1 - t));
+          mb = Math.round(200 * t + 15 * (1 - t));
+        } else {
+          const t = Math.min(1, norm);
+          mr = Math.round(220 * t + 15 * (1 - t));
+          mg = Math.round(110 * t + 15 * (1 - t));
+          mb = Math.round(15 * (1 - t));
+        }
+
+        ctx.fillStyle = `rgb(${mr},${mg},${mb})`;
+        // row 0 (MFCC[0]) at bottom, row 12 (MFCC[12]) at top
+        const yTop = MFCC_Y + Math.round((MFCC_ROWS - 1 - row) / MFCC_ROWS * MFCC_H);
+        const yBot = MFCC_Y + Math.round((MFCC_ROWS - row) / MFCC_ROWS * MFCC_H);
+        ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
       }
 
       // ── BTrack beat detection ──
@@ -1066,6 +1227,108 @@ export function createSpectrumWall() {
             : `${Math.round(v.freq)}`;
           oCtx.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
           oCtx.fillText(freqText, CANVAS_W - 4, cy);
+        }
+      }
+
+      // ── Timbre space overlay (bottom-left corner on overlay canvas) ──
+      // X = spectral centroid (brightness), Y = MFCC[1] (spectral tilt)
+      // Dot color = tristimulus (T1=R, T2=G, T3=B)
+      {
+        const pad = Math.round(8 * DPR);
+        const boxX = pad;
+        const boxY = CANVAS_H - TIMBRE_SZ - pad;
+        const boxW = TIMBRE_SZ;
+        const boxH = TIMBRE_SZ;
+
+        // Semi-transparent background
+        oCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        oCtx.fillRect(boxX, boxY, boxW, boxH);
+        oCtx.strokeStyle = 'rgba(100,100,100,0.5)';
+        oCtx.lineWidth = 1;
+        oCtx.strokeRect(boxX, boxY, boxW, boxH);
+
+        // Crosshair at center
+        const cx = boxX + boxW / 2;
+        const cy2 = boxY + boxH / 2;
+        oCtx.strokeStyle = 'rgba(60,60,60,0.6)';
+        oCtx.beginPath();
+        oCtx.moveTo(boxX, cy2);
+        oCtx.lineTo(boxX + boxW, cy2);
+        oCtx.moveTo(cx, boxY);
+        oCtx.lineTo(cx, boxY + boxH);
+        oCtx.stroke();
+
+        // Compute normalized position
+        // X: spectral centroid — log scale, 200Hz=left, 8000Hz=right
+        const centroidLog = s.spectralCentroidSmooth > 0
+          ? Math.log(Math.max(200, Math.min(8000, s.spectralCentroidSmooth)) / 200) / Math.log(8000 / 200)
+          : 0.5;
+        // Y: MFCC[1] — normalized adaptively (larger = warmer = bottom)
+        const mfcc1range = mfccMax[1] - mfccMin[1];
+        const mfcc1norm = mfcc1range > 1e-6
+          ? (s.mfcc[1] - mfccMin[1]) / mfcc1range
+          : 0.5;
+
+        const dotX = boxX + centroidLog * boxW;
+        const dotY = boxY + (1 - mfcc1norm) * boxH; // invert so "warm" is at bottom
+
+        // Update trail
+        if (s.signalPresent && s.rmsSmooth > 0.003) {
+          timbreTrailX[trailIdx] = dotX;
+          timbreTrailY[trailIdx] = dotY;
+          trailIdx = (trailIdx + 1) % TRAIL_LEN;
+          if (trailCount < TRAIL_LEN) trailCount++;
+        }
+
+        // Draw trail (fading dots)
+        for (let i = 0; i < trailCount; i++) {
+          const idx = (trailIdx - 1 - i + TRAIL_LEN) % TRAIL_LEN;
+          const age = i / TRAIL_LEN;
+          const alpha = (1 - age) * 0.4;
+          if (alpha < 0.02) continue;
+
+          // Color from tristimulus
+          const tR = Math.round(s.tristimulus[0] * 255);
+          const tG = Math.round(s.tristimulus[1] * 255);
+          const tB = Math.round(s.tristimulus[2] * 255);
+          oCtx.fillStyle = `rgba(${tR},${tG},${tB},${alpha})`;
+
+          const sz = Math.max(2, Math.round(3 * DPR * (1 - age * 0.5)));
+          oCtx.fillRect(timbreTrailX[idx] - sz / 2, timbreTrailY[idx] - sz / 2, sz, sz);
+        }
+
+        // Current dot (bright, larger)
+        if (s.signalPresent && s.rmsSmooth > 0.003) {
+          const tR = Math.min(255, Math.round(s.tristimulus[0] * 300 + 60));
+          const tG = Math.min(255, Math.round(s.tristimulus[1] * 300 + 60));
+          const tB = Math.min(255, Math.round(s.tristimulus[2] * 300 + 60));
+          const dotSz = Math.round(5 * DPR);
+          // White border
+          oCtx.fillStyle = 'rgba(255,255,255,0.9)';
+          oCtx.fillRect(dotX - dotSz / 2 - 1, dotY - dotSz / 2 - 1, dotSz + 2, dotSz + 2);
+          // Colored fill
+          oCtx.fillStyle = `rgb(${tR},${tG},${tB})`;
+          oCtx.fillRect(dotX - dotSz / 2, dotY - dotSz / 2, dotSz, dotSz);
+        }
+
+        // Axis labels
+        const lblSz = Math.round(CANVAS_H * 0.008);
+        oCtx.font = `${lblSz}px sans-serif`;
+        oCtx.textAlign = 'left';
+        oCtx.textBaseline = 'bottom';
+        oCtx.fillStyle = 'rgba(180,180,180,0.6)';
+        oCtx.fillText('bright →', boxX + 2, boxY + boxH - 2);
+        oCtx.save();
+        oCtx.translate(boxX + lblSz, boxY + boxH - lblSz);
+        oCtx.rotate(-Math.PI / 2);
+        oCtx.fillText('warm →', 0, 0);
+        oCtx.restore();
+
+        // Inharmonicity indicator — small bar at the bottom of the box
+        if (s.inharmonicity > 0.001) {
+          const barW = Math.round(Math.min(1, s.inharmonicity * 10) * boxW);
+          oCtx.fillStyle = `rgba(255,160,40,${Math.min(0.8, s.inharmonicity * 5)})`;
+          oCtx.fillRect(boxX, boxY + boxH - 3, barW, 3);
         }
       }
     },

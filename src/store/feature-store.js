@@ -82,4 +82,16 @@ export const store = {
   // ── Spectral flux ──
   spectralFlux: 0,       // rate of spectral change (0-1)
   spectralFluxSmooth: 0,
+
+  // ── Chroma / Key / Chord ──
+  chroma: new Float32Array(12),        // 12 pitch-class energies (C, C#, D, ..., B), normalized 0-1
+  detectedKey: '',                     // e.g. "A min", "C maj"
+  detectedKeyConfidence: 0,
+  detectedChord: '',                   // e.g. "Am", "C", "G7"
+  detectedChordConfidence: 0,
+
+  // ── Timbre (MFCCs + Tristimulus + Inharmonicity) ──
+  mfcc: new Float32Array(13),          // 13 mel-frequency cepstral coefficients
+  tristimulus: new Float32Array(3),    // T1 (fundamental), T2 (H2-H4), T3 (H5+)
+  inharmonicity: 0,                    // deviation of partials from harmonic series
 };

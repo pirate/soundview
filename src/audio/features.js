@@ -6,6 +6,8 @@ import { bands } from './filterbank.js';
 import { detectPitch } from './pitch.js';
 import { updateModulation } from './modulation.js';
 import { initFormants, detectFormants } from './formants.js';
+import { initChroma, updateChroma } from './chroma.js';
+import { initTimbre, updateTimbre } from './timbre.js';
 
 // ── Smoothing constants ──
 const SMOOTH_ATTACK = 0.3;
@@ -43,6 +45,8 @@ export function initFeatures(analyser, sr) {
   store.noiseFloor = 0.01;
 
   initFormants(sr, analyser.fftSize);
+  initChroma(sr, analyser.fftSize);
+  initTimbre(sr, analyser.fftSize);
 }
 
 export function updateFeatures() {
@@ -427,12 +431,22 @@ export function updateFeatures() {
   detectFormants();
 
   // ══════════════════════════════════════════════════
-  // 11. ADVANCE HISTORY INDEX
+  // 11. CHROMA + KEY/CHORD DETECTION
+  // ══════════════════════════════════════════════════
+  updateChroma();
+
+  // ══════════════════════════════════════════════════
+  // 12. TIMBRE DESCRIPTORS (MFCCs, tristimulus, inharmonicity)
+  // ══════════════════════════════════════════════════
+  updateTimbre();
+
+  // ══════════════════════════════════════════════════
+  // 13. ADVANCE HISTORY INDEX
   // ══════════════════════════════════════════════════
   store.historyIndex = (store.historyIndex + 1) % HISTORY_LEN;
 
   // ══════════════════════════════════════════════════
-  // 12. PER-BAND MODULATION SPECTRUM
+  // 14. PER-BAND MODULATION SPECTRUM
   // ══════════════════════════════════════════════════
   updateModulation();
 }
