@@ -423,6 +423,7 @@ export function createSpectrumWall() {
   let prevFluxY = -1;
   let prevDerivY = -1;
   let btTempoCounter = 0;
+  let beatPulse = 0;  // smooth 0→1 pulse for beat indicator circle
 
   // ── MFCC adaptive normalization state ──
   const mfccMin = new Float32Array(13).fill(0);
@@ -1178,6 +1179,7 @@ export function createSpectrumWall() {
           if (btConfirmedBeats >= 6) btShowBeats = true;
           if (btShowBeats) {
             beatFlash = 5;
+            beatPulse = 1;  // trigger pulse for beat indicator
             btLastBeatTime = time;
             btBeatCount++;
             if (btBeatCount % 10 === 0) {
@@ -1223,6 +1225,10 @@ export function createSpectrumWall() {
         btPeriod = 0;
         btCounter = 999;
       }
+
+      // Decay beat pulse (exponential decay for smooth animation)
+      beatPulse *= 0.88;
+      if (beatPulse < 0.01) beatPulse = 0;
 
       // Draw blue vertical beat line — only when btShowBeats is true
       if (beatFlash > 0 && btShowBeats) {
@@ -1310,6 +1316,47 @@ export function createSpectrumWall() {
           oCtx.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
           oCtx.fillText(freqText, CANVAS_W - 4, cy);
         }
+      }
+
+      // ── Beat indicator circle (upper-right sidebar) ──
+      if (btShowBeats && beatPulse > 0) {
+        const pad = Math.round(12 * DPR);
+        const circR = Math.round(8 * DPR);
+        const bx = CANVAS_W - ARROW_W / 2;
+        const by = pad + circR;
+
+        // Outer glow
+        const glowR = circR + Math.round(circR * beatPulse * 0.8);
+        oCtx.beginPath();
+        oCtx.arc(bx, by, glowR, 0, Math.PI * 2);
+        oCtx.fillStyle = `rgba(255,30,30,${beatPulse * 0.25})`;
+        oCtx.fill();
+
+        // Main circle — scales slightly on beat
+        const scaleR = circR + Math.round(circR * beatPulse * 0.3);
+        oCtx.beginPath();
+        oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
+        const brightness = Math.round(120 + 135 * beatPulse);
+        oCtx.fillStyle = `rgb(${brightness},${Math.round(20 * (1 - beatPulse))},${Math.round(20 * (1 - beatPulse))})`;
+        oCtx.fill();
+
+        // Bright center on beat
+        if (beatPulse > 0.3) {
+          oCtx.beginPath();
+          oCtx.arc(bx, by, scaleR * 0.5, 0, Math.PI * 2);
+          oCtx.fillStyle = `rgba(255,200,200,${(beatPulse - 0.3) * 0.7})`;
+          oCtx.fill();
+        }
+      } else if (btShowBeats) {
+        // Dim idle circle when beats are active but between pulses
+        const pad = Math.round(12 * DPR);
+        const circR = Math.round(8 * DPR);
+        const bx = CANVAS_W - ARROW_W / 2;
+        const by = pad + circR;
+        oCtx.beginPath();
+        oCtx.arc(bx, by, circR, 0, Math.PI * 2);
+        oCtx.fillStyle = 'rgb(120,20,20)';
+        oCtx.fill();
       }
 
       // ── Circle of Fifths key overlay (bottom-left, above timbre map) ──
