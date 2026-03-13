@@ -29,9 +29,6 @@ let keyFrameCounter = 0;
 let silenceFrames = 0; // consecutive frames without signal
 const keyAccum = new Float32Array(24); // smoothed correlations for 12 major + 12 minor
 
-// Spectral whitening: local median buffer (reused each frame)
-const WHITEN_HALF = 8; // ±8 bins (~43Hz window at 5.4Hz/bin)
-
 export function initChroma(sr, fft) {
   sampleRate = sr;
   fftSize = fft;
@@ -55,30 +52,10 @@ export function updateChroma() {
   const minBin = Math.max(1, Math.floor(60 / binHz));
   const maxBin = Math.min(numBins - 1, Math.floor(5000 / binHz));
 
-  // Spectral whitening: gate bins on prominence above local spectral floor.
-  // Tonal content creates peaks that protrude above the local average;
-  // broadband percussive energy sits near the local average and is rejected.
+  // Fold ALL FFT bins into chroma — no spectral gating at the bin level.
   for (let i = minBin; i <= maxBin; i++) {
     if (store.spectrumDb[i] < -90) continue; // noise gate
-
-    // Local spectral floor: mean of surrounding bins (excluding center)
-    const lo = Math.max(minBin, i - WHITEN_HALF);
-    const hi = Math.min(maxBin, i + WHITEN_HALF);
-    let localSum = 0;
-    let localCount = 0;
-    for (let j = lo; j <= hi; j++) {
-      if (j === i) continue; // exclude self so peak doesn't inflate floor
-      localSum += store.spectrumDb[j];
-      localCount++;
-    }
-    const localFloor = localCount > 0 ? localSum / localCount : store.spectrumDb[i];
-
-    // Require bin to protrude ≥2dB above local floor (tonal prominence)
-    if (store.spectrumDb[i] - localFloor < 2) continue;
-
     const freq = i * binHz;
-    // Use actual spectral power (not prominence-derived) so the
-    // log-scale normalization below sees realistic magnitudes
     const power = Math.pow(10, store.spectrumDb[i] / 10);
 
     // MIDI note → pitch class (0=C, 1=C#, ..., 11=B)
@@ -95,6 +72,16 @@ export function updateChroma() {
     const db = rawChroma[i] > 1e-15 ? 10 * Math.log10(rawChroma[i]) : -150;
     const norm = (db + store._sensitivity - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
     rawChroma[i] = Math.max(0, Math.min(1, norm));
+  }
+
+  // Chroma-level whitening: subtract the median pitch-class energy.
+  // Broadband noise (drums, hiss) adds roughly equal energy to all 12 bins —
+  // subtracting the median removes this floor while preserving the peaks
+  // from tonal content. This is robust regardless of audio source or FFT shape.
+  const sorted = Array.from(rawChroma).sort((a, b) => a - b);
+  const chromaMedian = (sorted[5] + sorted[6]) / 2;
+  for (let i = 0; i < 12; i++) {
+    rawChroma[i] = Math.max(0, rawChroma[i] - chromaMedian);
   }
 
   // Smooth into store — asymmetric attack/release keeps onsets responsive
