@@ -55,31 +55,31 @@ export function updateChroma() {
   const minBin = Math.max(1, Math.floor(60 / binHz));
   const maxBin = Math.min(numBins - 1, Math.floor(5000 / binHz));
 
-  // Spectral whitening: subtract local median so broadband energy (drums)
-  // becomes ~0 while tonal peaks (pitched instruments) are preserved.
-  // This is more robust than hard peak-picking which can reject real peaks
-  // that span multiple FFT bins.
+  // Spectral whitening: gate bins on prominence above local spectral floor.
+  // Tonal content creates peaks that protrude above the local average;
+  // broadband percussive energy sits near the local average and is rejected.
   for (let i = minBin; i <= maxBin; i++) {
     if (store.spectrumDb[i] < -90) continue; // noise gate
 
-    // Compute local median over ±WHITEN_HALF bins
+    // Local spectral floor: mean of surrounding bins (excluding center)
     const lo = Math.max(minBin, i - WHITEN_HALF);
     const hi = Math.min(maxBin, i + WHITEN_HALF);
     let localSum = 0;
     let localCount = 0;
     for (let j = lo; j <= hi; j++) {
+      if (j === i) continue; // exclude self so peak doesn't inflate floor
       localSum += store.spectrumDb[j];
       localCount++;
     }
-    const localMean = localSum / localCount;
+    const localFloor = localCount > 0 ? localSum / localCount : store.spectrumDb[i];
 
-    // Only fold energy that exceeds the local floor by ≥3dB (tonal prominence)
-    const prominence = store.spectrumDb[i] - localMean;
-    if (prominence < 3) continue;
+    // Require bin to protrude ≥2dB above local floor (tonal prominence)
+    if (store.spectrumDb[i] - localFloor < 2) continue;
 
     const freq = i * binHz;
-    // Use prominence-weighted power so strong peaks contribute more
-    const power = Math.pow(10, prominence / 10);
+    // Use actual spectral power (not prominence-derived) so the
+    // log-scale normalization below sees realistic magnitudes
+    const power = Math.pow(10, store.spectrumDb[i] / 10);
 
     // MIDI note → pitch class (0=C, 1=C#, ..., 11=B)
     const midi = 12 * Math.log2(freq / 440) + 69;
