@@ -1,3 +1,20 @@
+/* ── teenage engineering inspired ── */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+
+:root {
+  --te-black: #0a0a0a;
+  --te-dark: #141414;
+  --te-mid: #1e1e1e;
+  --te-border: #2a2a2a;
+  --te-dim: #555;
+  --te-text: #ccc;
+  --te-bright: #eee;
+  --te-orange: #ff6600;
+  --te-orange-dim: rgba(255, 102, 0, 0.4);
+  --te-mono: 'Space Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -6,9 +23,10 @@
 
 body {
   overflow: hidden;
-  background: #050510;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #fff;
+  background: var(--te-black);
+  font-family: var(--te-mono);
+  color: var(--te-text);
+  -webkit-font-smoothing: antialiased;
 }
 
 #spectrogram {
@@ -21,6 +39,8 @@ body {
   image-rendering: auto;
 }
 
+/* ── overlay splash ── */
+
 #overlay {
   position: fixed;
   inset: 0;
@@ -28,8 +48,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 5, 16, 0.95);
-  transition: opacity 0.6s ease;
+  background: rgba(10, 10, 10, 0.97);
+  transition: opacity 0.4s ease;
 }
 
 #overlay.hidden {
@@ -42,33 +62,43 @@ body {
 }
 
 #overlay-content h1 {
-  font-size: 3rem;
-  font-weight: 300;
-  letter-spacing: 0.3em;
-  margin-bottom: 0.5rem;
+  font-family: var(--te-mono);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--te-bright);
+  margin-bottom: 0.6rem;
 }
 
 #overlay-content p {
-  font-size: 1rem;
-  opacity: 0.5;
-  margin-bottom: 2rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--te-dim);
+  margin-bottom: 2.4rem;
 }
 
 #start-btn {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #fff;
-  padding: 0.8rem 2.5rem;
-  font-size: 1rem;
+  border: 1px solid var(--te-orange);
+  color: var(--te-orange);
+  padding: 0.55rem 2rem;
+  font-family: var(--te-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
   cursor: pointer;
-  border-radius: 4px;
-  transition: border-color 0.3s, background 0.3s;
+  transition: background 0.2s, color 0.2s;
 }
 
 #start-btn:hover {
-  border-color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--te-orange);
+  color: var(--te-black);
 }
+
+/* ── frequency / feature labels ── */
 
 #spectrogram-labels {
   position: fixed;
@@ -82,48 +112,103 @@ body {
 
 .spec-label {
   position: absolute;
-  left: 4px;
+  left: 6px;
   transform: translateY(-50%);
-  font-size: 9px;
+  font-family: var(--te-mono);
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
   line-height: 1;
-  color: rgba(255, 255, 255, 0.6);
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+  color: rgba(255, 102, 0, 0.5);
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
+  text-transform: uppercase;
 }
 
 .feat-label {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 8px;
+  color: rgba(255, 102, 0, 0.35);
+  font-size: 7px;
+  letter-spacing: 0.08em;
 }
+
+/* ── controls panel ── */
 
 #gain-controls {
   position: fixed;
-  bottom: 12px;
-  right: 12px;
+  bottom: 16px;
+  right: 16px;
   z-index: 5;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  opacity: 0.6;
+  gap: 6px;
+  background: rgba(10, 10, 10, 0.85);
+  border: 1px solid var(--te-border);
+  padding: 10px 14px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--te-dim);
+  opacity: 0.7;
+  transition: opacity 0.2s;
 }
 
 #gain-controls:hover {
   opacity: 1;
+  border-color: var(--te-orange-dim);
 }
 
 #gain-controls label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
+/* ── custom range sliders ── */
+
 #gain-controls input[type="range"] {
-  width: 100px;
-  accent-color: #888;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 2px;
+  background: var(--te-border);
+  outline: none;
+  border: none;
+  cursor: pointer;
+}
+
+#gain-controls input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  background: var(--te-orange);
+  border: none;
+  cursor: pointer;
+}
+
+#gain-controls input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--te-orange);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+#gain-controls input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--te-border);
+}
+
+#gain-controls input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: var(--te-border);
 }
 
 #gain-controls span {
-  width: 28px;
+  width: 24px;
   text-align: right;
+  color: var(--te-orange);
+  font-variant-numeric: tabular-nums;
 }

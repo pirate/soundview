@@ -150,18 +150,18 @@ export function setFeatGain(g) {
   featGain = Math.max(1, Math.min(50, g));
 }
 
-// ── Full-spectrum colormap (black → blue → cyan → yellow → red → magenta → green → white) ──
+// ── TE-inspired colormap (black → deep orange → amber → warm white) ──
 const CSTOPS = [
   [0.00, 0, 0, 0],
-  [0.12, 0, 0, 150],
-  [0.24, 0, 120, 220],
-  [0.36, 0, 210, 180],
-  [0.48, 200, 220, 0],
-  [0.60, 240, 120, 0],
-  [0.72, 220, 0, 60],
-  [0.84, 180, 0, 220],
-  [0.92, 0, 220, 80],
-  [1.00, 255, 255, 255],
+  [0.10, 20, 8, 2],
+  [0.22, 60, 18, 0],
+  [0.34, 140, 40, 0],
+  [0.46, 200, 70, 0],
+  [0.58, 255, 102, 0],
+  [0.70, 255, 140, 20],
+  [0.82, 255, 185, 60],
+  [0.92, 255, 220, 140],
+  [1.00, 255, 248, 230],
 ];
 
 const cmapLUT = new Uint8Array(256 * 3);
@@ -235,31 +235,31 @@ function classifyInstrument(topFreqs, pitchHz, pitchConf, spectralCentroid, spec
 
   // Drums: high flatness, no pitch, broadband
   if (spectralFlatness > 0.15 && pitchConf < 0.2) {
-    return { name: 'drums', r: 180, g: 50, b: 30 };
+    return { name: 'drums', r: 160, g: 50, b: 0 };
   }
   // Vocal: pitch present, moderate centroid (200-3000Hz), moderate harmonicity
   if (pitchConf > 0.3 && harmonicity > 0.15 && pitchHz > 70 && pitchHz < 500 &&
       spectralCentroid > 300 && spectralCentroid < 3500) {
-    return { name: 'vocal', r: 50, g: 140, b: 50 };
+    return { name: 'vocal', r: 255, g: 102, b: 0 };
   }
   // Brass: high centroid, strong harmonics, bright
   if (pitchConf > 0.25 && spectralCentroid > 2000 && harmonicity > 0.3) {
-    return { name: 'brass', r: 170, g: 130, b: 20 };
+    return { name: 'brass', r: 200, g: 140, b: 30 };
   }
   // Strings: moderate centroid, moderate harmonicity, smooth
   if (pitchConf > 0.2 && harmonicity > 0.15 && spectralFlatness < 0.08 &&
       spectralCentroid > 500 && spectralCentroid < 3000) {
-    return { name: 'strings', r: 120, g: 60, b: 140 };
+    return { name: 'strings', r: 140, g: 80, b: 20 };
   }
   // Piano: pitch + percussive onset, moderate harmonicity
   if (pitchConf > 0.2 && harmonicity > 0.1 && spectralCentroid > 400) {
-    return { name: 'piano', r: 60, g: 100, b: 150 };
+    return { name: 'piano', r: 180, g: 120, b: 40 };
   }
   // Noise/other
   if (spectralFlatness > 0.08) {
-    return { name: 'noise', r: 80, g: 80, b: 80 };
+    return { name: 'noise', r: 60, g: 50, b: 40 };
   }
-  return { name: 'other', r: 40, g: 40, b: 60 };
+  return { name: 'other', r: 40, g: 30, b: 20 };
 }
 
 function freqToCanvasY(freqHz) {
@@ -472,11 +472,11 @@ export function createSpectrumWall() {
         const fuzzRowH = Math.round(COCHLEA_H * 0.05); // ~5% of cochleagram per row
         // 3 rows at the very top of the cochleagram: high / mid / low
 
-        // Row 1 (top): High freq — cyan if hissy, white if balanced
+        // Row 1 (top): High freq — bright orange if hissy, warm cream if balanced
         if (hiI > 0.05) {
           const n = Math.round(hiI * 40 * scrollSpeed);
           const hissy = hiR > 0.4;
-          const cr = hissy ? 120 : 240, cg = hissy ? 230 : 240, cb = 250;
+          const cr = hissy ? 255 : 255, cg = hissy ? 140 : 220, cb = hissy ? 20 : 140;
           for (let p = 0; p < n; p++) {
             const a = (0.3 + Math.random() * 0.5) * hiI;
             ctx.fillStyle = `rgba(${cr},${cg},${cb},${a})`;
@@ -484,11 +484,11 @@ export function createSpectrumWall() {
               Math.floor(Math.random() * fuzzRowH), fuzzPx, fuzzPx);
           }
         }
-        // Row 2: Mid freq — pink or grey
+        // Row 2: Mid freq — amber or grey
         if (midI > 0.05) {
           const n = Math.round(midI * 40 * scrollSpeed);
-          const pink = lowR > 0.35;
-          const cr = pink ? 220 : 200, cg = pink ? 100 : 200, cb = pink ? 160 : 200;
+          const warm = lowR > 0.35;
+          const cr = warm ? 255 : 180, cg = warm ? 102 : 160, cb = warm ? 0 : 140;
           for (let p = 0; p < n; p++) {
             const a = (0.3 + Math.random() * 0.5) * midI;
             ctx.fillStyle = `rgba(${cr},${cg},${cb},${a})`;
@@ -496,12 +496,12 @@ export function createSpectrumWall() {
               fuzzRowH + Math.floor(Math.random() * fuzzRowH), fuzzPx, fuzzPx);
           }
         }
-        // Row 3: Low freq — brown/red
+        // Row 3: Low freq — deep burnt orange
         if (lowI > 0.05) {
           const n = Math.round(lowI * 40 * scrollSpeed);
           for (let p = 0; p < n; p++) {
             const a = (0.3 + Math.random() * 0.5) * lowI;
-            ctx.fillStyle = `rgba(180,70,30,${a})`;
+            ctx.fillStyle = `rgba(160,50,0,${a})`;
             ctx.fillRect(rightX + Math.floor(Math.random() * scrollSpeed),
               fuzzRowH * 2 + Math.floor(Math.random() * fuzzRowH), fuzzPx, fuzzPx);
           }
@@ -513,10 +513,10 @@ export function createSpectrumWall() {
         ? detectMultiPitch(spectrum, SAMPLE_RATE, FFT_SIZE)
         : [];
       const VOICE_COLORS = [
-        [255, 120, 0],
-        [0, 170, 255],
-        [70, 255, 70],
-        [255, 70, 255],
+        [255, 102, 0],    // TE orange
+        [255, 180, 60],   // amber
+        [200, 200, 200],  // light grey
+        [255, 220, 140],  // warm cream
       ];
 
       // ── Feature markers overlaid on cochleagram at actual freq positions ──
@@ -535,24 +535,24 @@ export function createSpectrumWall() {
         ctx.fillRect(rightX, Math.round(py) - Math.floor(thick / 2), scrollSpeed, thick);
       }
 
-      // Formants — bright green dots (F1 brighter, F2/F3 dimmer)
+      // Formants — warm amber dots (F1 brighter, F2/F3 dimmer)
       if (s.formant1Smooth > FREQ_LO) {
         const fy = freqToCanvasY(s.formant1Smooth);
-        ctx.fillStyle = 'rgba(0,255,80,0.8)';
+        ctx.fillStyle = 'rgba(255,180,60,0.8)';
         ctx.fillRect(rightX, Math.round(fy) - 1, scrollSpeed, 3);
       }
       if (s.formant2Smooth > FREQ_LO) {
         const fy = freqToCanvasY(s.formant2Smooth);
-        ctx.fillStyle = 'rgba(0,255,80,0.6)';
+        ctx.fillStyle = 'rgba(255,180,60,0.6)';
         ctx.fillRect(rightX, Math.round(fy) - 1, scrollSpeed, 3);
       }
       if (s.formant3Smooth > FREQ_LO) {
         const fy = freqToCanvasY(s.formant3Smooth);
-        ctx.fillStyle = 'rgba(0,255,80,0.4)';
+        ctx.fillStyle = 'rgba(255,180,60,0.4)';
         ctx.fillRect(rightX, Math.round(fy) - 1, scrollSpeed, 3);
       }
 
-      // Spectral centroid — pink line, only when stable (not jumping wildly)
+      // Spectral centroid — bright orange line, only when stable (not jumping wildly)
       if (s.spectralCentroidSmooth > FREQ_LO && s.rmsSmooth > 0.003) {
         const centroidDelta = prevCentroid > 0
           ? Math.abs(s.spectralCentroidSmooth - prevCentroid) / prevCentroid : 1;
@@ -566,7 +566,7 @@ export function createSpectrumWall() {
           const cy = freqToCanvasY(s.spectralCentroidSmooth);
           const thick = Math.round(Math.max(2, COCHLEA_H * 0.003));
           const fadeIn = Math.min(1, centroidStable / 6);
-          ctx.fillStyle = `rgba(255,80,220,${Math.min(0.85, s.rmsSmooth * 40) * fadeIn})`;
+          ctx.fillStyle = `rgba(255,102,0,${Math.min(0.85, s.rmsSmooth * 40) * fadeIn})`;
           ctx.fillRect(rightX, Math.round(cy) - Math.floor(thick / 2), scrollSpeed, thick);
         }
       } else {
@@ -586,10 +586,10 @@ export function createSpectrumWall() {
         }
       }
 
-      // Spectral rolloff — cyan line on cochleagram
+      // Spectral rolloff — dim orange line on cochleagram
       if (s.spectralRolloff > FREQ_LO && s.rmsSmooth > 0.005) {
         const ry = freqToCanvasY(s.spectralRolloff);
-        ctx.fillStyle = 'rgba(0,220,255,0.5)';
+        ctx.fillStyle = 'rgba(255,140,20,0.4)';
         ctx.fillRect(rightX, Math.round(ry), scrollSpeed, 2);
       }
 
@@ -618,7 +618,7 @@ export function createSpectrumWall() {
           if (bandFreq < FREQ_LO || bandFreq > FREQ_HI) continue;
           const by = freqToCanvasY(bandFreq);
           if (s.bandEnergySmooth[i] < 0.001) continue;
-          ctx.fillStyle = 'rgba(0,255,200,0.5)';
+          ctx.fillStyle = 'rgba(255,140,20,0.5)';
           ctx.fillRect(rightX, Math.round(by), scrollSpeed, 2);
         }
       }
@@ -632,7 +632,7 @@ export function createSpectrumWall() {
           if (amp < 0.01) continue;
           const hy = freqToCanvasY(hFreq);
           if (hy < 0 || hy >= COCHLEA_H) continue;
-          ctx.fillStyle = `rgba(0,255,160,${Math.min(0.7, amp * 3)})`;
+          ctx.fillStyle = `rgba(255,180,60,${Math.min(0.7, amp * 3)})`;
           ctx.fillRect(rightX, Math.round(hy), scrollSpeed, 2);
         }
       }
@@ -734,13 +734,13 @@ export function createSpectrumWall() {
         const hNum = Math.round(hFloat) + 1; // 1-based harmonic number
         // Base RGB per harmonic role (before brightness/slope modulation)
         let baseR, baseG, baseB;
-        if (hNum === 1)       { baseR = 255; baseG = 255; baseB = 255; } // white — fundamental
-        else if (hNum === 2)  { baseR = 60;  baseG = 220; baseB = 240; } // cyan — breathiness
-        else if (hNum === 3)  { baseR = 255; baseG = 160; baseB = 40;  } // orange — power
-        else if (hNum === 5 || hNum === 7) { baseR = 255; baseG = 230; baseB = 50; } // yellow — odd/nasal
-        else if (hNum >= 8 && hNum <= 10) { baseR = 230; baseG = 80; baseB = 220; } // magenta — brilliance
-        else if (hNum % 2 === 0) { baseR = 80; baseG = 140; baseB = 230; } // blue — even harmonics
-        else { baseR = 200; baseG = 170; baseB = 80; } // warm gold — upper odd partials
+        if (hNum === 1)       { baseR = 255; baseG = 248; baseB = 230; } // warm white — fundamental
+        else if (hNum === 2)  { baseR = 255; baseG = 180; baseB = 60;  } // amber — breathiness
+        else if (hNum === 3)  { baseR = 255; baseG = 102; baseB = 0;   } // TE orange — power
+        else if (hNum === 5 || hNum === 7) { baseR = 255; baseG = 200; baseB = 80; } // gold — odd/nasal
+        else if (hNum >= 8 && hNum <= 10) { baseR = 200; baseG = 80; baseB = 0; } // deep orange — brilliance
+        else if (hNum % 2 === 0) { baseR = 180; baseG = 120; baseB = 60; } // bronze — even harmonics
+        else { baseR = 220; baseG = 160; baseB = 60; } // warm gold — upper odd partials
 
         // Brightness from amplitude, slight warmth shift in formant peaks
         let r = Math.round(v * baseR);
@@ -984,12 +984,12 @@ export function createSpectrumWall() {
       // Draw blue vertical beat line — only when btShowBeats is true
       if (beatFlash > 0 && btShowBeats) {
         beatFlash--;
-        ctx.fillStyle = `rgba(60,140,255,${(beatFlash / 5) * 0.3})`;
+        ctx.fillStyle = `rgba(255,102,0,${(beatFlash / 5) * 0.25})`;
         ctx.fillRect(rightX, 0, scrollSpeed, CANVAS_H);
         if (beatFlash === 4 && btShowBpm > 0) {
           const fontSize = Math.round(CANVAS_H * 0.018);
-          ctx.font = `bold ${fontSize}px sans-serif`;
-          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.font = `bold ${fontSize}px 'Space Mono', monospace`;
+          ctx.fillStyle = 'rgba(255,102,0,0.9)';
           ctx.fillText(`${btShowBpm}`, rightX - fontSize * 2, fontSize + 4);
           btShowBpm = 0;
         }
@@ -1022,7 +1022,7 @@ export function createSpectrumWall() {
       const arrowZoneW = Math.round(30 * DPR);
       const totalW = textZoneW + arrowZoneW;
       // Arrow zone background is solid black on main canvas (SCROLL_W to CANVAS_W)
-      oCtx.font = `${fontSize}px sans-serif`;
+      oCtx.font = `${fontSize}px 'Space Mono', monospace`;
       oCtx.textAlign = 'right';
       oCtx.textBaseline = 'middle';
       const arrowRight = CANVAS_W - textZoneW; // arrows go up to here
@@ -1064,7 +1064,7 @@ export function createSpectrumWall() {
           const freqText = v.freq >= 1000
             ? `${(v.freq / 1000).toFixed(1)}k`
             : `${Math.round(v.freq)}`;
-          oCtx.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
+          oCtx.fillStyle = `rgba(255,180,60,${alpha * 0.7})`;
           oCtx.fillText(freqText, CANVAS_W - 4, cy);
         }
       }
