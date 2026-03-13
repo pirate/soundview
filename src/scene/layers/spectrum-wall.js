@@ -812,10 +812,6 @@ export function createSpectrumWall() {
 
       // ── Chord label in harmonic strip ──
       framesSinceChordDraw++;
-      if (framesSinceChordDraw % 120 === 0) {
-        console.log('chord debug:', s.chordName, 'conf:', s.chordConfidence.toFixed(3),
-          'chroma:', Array.from(s.chromagramSmooth).map(v => v.toFixed(2)).join(','));
-      }
       if (s.chordConfidence > 0.25 && s.chordName) {
         if (s.chordName === prevChordName) {
           chordStableFrames++;
@@ -1112,6 +1108,24 @@ export function createSpectrumWall() {
           oCtx.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
           oCtx.fillText(freqText, CANVAS_W - 4, cy);
         }
+      }
+
+      // ── Key label in right sidebar, at harmonics section height ──
+      if (s.keyName && s.keyConfidence > 0.15) {
+        const keyFontSize = Math.round(CANVAS_H * 0.022);
+        oCtx.font = `bold ${keyFontSize}px sans-serif`;
+        oCtx.textAlign = 'center';
+        oCtx.textBaseline = 'middle';
+        const kx = SCROLL_W + ARROW_W * 0.5;
+        const ky = HARM_Y + HARM_H * 0.5;
+        const alpha = Math.min(0.95, 0.3 + s.keyConfidence * 0.7);
+        // Black shadow
+        oCtx.lineWidth = 3;
+        oCtx.strokeStyle = `rgba(0,0,0,${alpha})`;
+        oCtx.strokeText(s.keyName, kx, ky);
+        // White fill
+        oCtx.fillStyle = `rgba(255,255,255,${alpha})`;
+        oCtx.fillText(s.keyName, kx, ky);
       }
     },
   };

@@ -8,6 +8,7 @@ import { updateModulation } from './modulation.js';
 import { initFormants, detectFormants } from './formants.js';
 import { updateChromagram } from './chroma.js';
 import { detectChord } from './chord.js';
+import { updateKeyDetection } from './key.js';
 
 // ── Smoothing constants ──
 const SMOOTH_ATTACK = 0.3;
@@ -361,9 +362,12 @@ export function updateFeatures() {
     store.chordConfidence = 0;
   }
 
-  // Store chromagram snapshot for future key detection
+  // Store chromagram snapshot for key detection history
   store.chromagramHistory[store.chromagramHistoryIndex].set(store.chromagramSmooth);
   store.chromagramHistoryIndex = (store.chromagramHistoryIndex + 1) % store.chromagramHistory.length;
+
+  // Key detection (Krumhansl-Schmuckler on accumulated chroma)
+  updateKeyDetection();
 
   // ══════════════════════════════════════════════════
   // 8. MODULATION ESTIMATION

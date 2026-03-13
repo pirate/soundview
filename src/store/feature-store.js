@@ -92,4 +92,10 @@ export const store = {
   chordQuality: '',       // 'maj', 'min', 'dim', 'aug', 'sus2', 'sus4', 'maj7', 'min7', '7'
   chordName: '',          // display string e.g. "Am", "C#dim"
   chordConfidence: 0,     // 0-1
+
+  // ── Key detection ──
+  keyRoot: -1,            // 0-11 (C=0, C#=1, ..., B=11), -1 = none
+  keyMode: '',            // 'maj' or 'min'
+  keyName: '',            // display string e.g. "C", "Am"
+  keyConfidence: 0,       // 0-1
 };
