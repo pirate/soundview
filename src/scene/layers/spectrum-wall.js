@@ -940,30 +940,39 @@ export function createSpectrumWall() {
       }
 
       // Key + chord hold smoothing (for Circle of Fifths overlay)
-      if (s.signalPresent && s.detectedKeyConfidence > 0.3) {
-        if (s.detectedKey !== displayKey) {
-          keyHoldFrames++;
-          if (keyHoldFrames > 30) {
-            displayKey = s.detectedKey;
+      // Clear cached display values when signal/confidence drops so stale
+      // detections don't persist through silence into the next signal.
+      if (!s.signalPresent) {
+        displayKey = '';
+        displayChord = '';
+        keyHoldFrames = 0;
+        chordHoldFrames = 0;
+      } else {
+        if (s.detectedKeyConfidence > 0.3) {
+          if (s.detectedKey !== displayKey) {
+            keyHoldFrames++;
+            if (keyHoldFrames > 30) {
+              displayKey = s.detectedKey;
+              keyHoldFrames = 0;
+            }
+          } else {
             keyHoldFrames = 0;
           }
-        } else {
-          keyHoldFrames = 0;
         }
-      }
-      if (s.signalPresent && s.detectedChordConfidence > 0.5) {
-        if (s.detectedChord !== displayChord) {
-          chordHoldFrames++;
-          if (chordHoldFrames > 10) {
-            displayChord = s.detectedChord;
+        if (s.detectedChordConfidence > 0.5) {
+          if (s.detectedChord !== displayChord) {
+            chordHoldFrames++;
+            if (chordHoldFrames > 10) {
+              displayChord = s.detectedChord;
+              chordHoldFrames = 0;
+            }
+          } else {
             chordHoldFrames = 0;
           }
-        } else {
-          chordHoldFrames = 0;
         }
       }
-      // Chord text overlay on the note strip
-      if (displayChord && btFrameCount % 60 === 0) {
+      // Chord text overlay on the note strip — only when signal is present
+      if (displayChord && s.signalPresent && btFrameCount % 60 === 0) {
         const fontSize = Math.round(NOTE_H * 0.38);
         ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.fillStyle = 'rgba(255,255,200,0.8)';

@@ -106,7 +106,7 @@ Harmonics are computed from the store's autocorrelation-based pitch, with fallba
 ### MIDI Note Strip (~7% of screen)
 Scrolling piano-roll-style view of detected chord notes, with 12 rows (one per pitch class, C at bottom, B at top):
 
-- **Chord tones** light up in their pitch-class color (C=red, C#=orange, D=yellow, E=green, F#=cyan, G=blue, A=purple, B=pink) at full brightness proportional to chroma energy
+- **Chord tones** light up in their pitch-class color (C=red, C#=orange, D=yellow, D#=yellow-green, E=green, F=teal, F#=cyan, G=blue, G#=indigo, A=purple, A#=magenta, B=pink) at full brightness proportional to chroma energy
 - **Non-chord active notes** shown as dim versions of their pitch-class color
 - **Inactive notes** are near-black, creating a clear on/off MIDI-note appearance
 - **Chord name** overlaid as text on the strip every ~1 second
