@@ -1,19 +1,30 @@
-// Fullscreen scrolling cochleagram + harmonic profile + feature strip + voice circles.
+// Fullscreen scrolling cochleagram + harmonic profile + MIDI note strip + feature strip +
+// MFCC strip + overlays (Circle of Fifths, timbre space, voice arrows).
 // Pure 2D canvas rendering — no WebGL/Three.js.
 
-import { SPECTRUM_BINS, NUM_BANDS } from '../../store/feature-store.js';
+import { SPECTRUM_BINS, NUM_BANDS, store as featureStore } from '../../store/feature-store.js';
 
 // ── Multi-voice pitch detection (subharmonic summation) ──
 const MAX_VOICES = 4;
 
+// Pre-allocated buffer initialized lazily after constants are defined
+let _dmpScores = null;
+let _dmpBinHz, _dmpMinBin, _dmpMaxBin;
+
 function detectMultiPitch(spectrumDb, sampleRate, fftSize) {
-  const binHz = sampleRate / fftSize;
-  const minF0 = 60, maxF0 = 2000;
-  const minBin = Math.floor(minF0 / binHz);
-  const maxBin = Math.min(Math.floor(maxF0 / binHz), SPECTRUM_BINS - 1);
+  if (!_dmpScores) {
+    _dmpBinHz = SAMPLE_RATE / FFT_SIZE;
+    _dmpMinBin = Math.floor(60 / _dmpBinHz);
+    _dmpMaxBin = Math.min(Math.floor(2000 / _dmpBinHz), SPECTRUM_BINS - 1);
+    _dmpScores = new Float32Array(_dmpMaxBin + 1);
+  }
+  const binHz = _dmpBinHz;
+  const minBin = _dmpMinBin;
+  const maxBin = _dmpMaxBin;
   const numHarmonics = 8;
 
-  const scores = new Float32Array(maxBin + 1);
+  const scores = _dmpScores;
+  scores.fill(0);
 
   for (let b = minBin; b <= maxBin; b++) {
     let sum = 0;
@@ -70,16 +81,26 @@ const CANVAS_H = Math.round(window.innerHeight * DPR);
 const ARROW_W = Math.round(90 * DPR); // reserved for voice arrows on right
 const SCROLL_W = CANVAS_W - ARROW_W;  // scrolling area stops before arrows
 const FREQ_ROW_PX = 1;
-// Use ~60% of canvas height for cochleagram, rest for harmonics + features
-const COCHLEA_H = Math.round(CANVAS_H * 0.60);
+// Layout: cochleagram → harmonics → notes (MIDI roll) → features → mfcc
+// Overlays: voice arrows (right), Circle of Fifths + timbre space (bottom-left)
+const COCHLEA_H = Math.round(CANVAS_H * 0.48);
 const NUM_FREQ_ROWS = COCHLEA_H; // 1 row per pixel
 const HARM_ROWS = 32;
 const HARM_MAX = 16; // only display first 16 harmonics, spread across 32 rows
-const HARM_H = Math.round(CANVAS_H * 0.25); // ~25% for harmonics
+const HARM_H = Math.round(CANVAS_H * 0.17);
 const HARM_ROW_PX = Math.round(HARM_H / HARM_ROWS);
-const HARM_Y = COCHLEA_H; // starts right after cochleagram
-const FEAT_ROW_PX = Math.round((CANVAS_H - COCHLEA_H - HARM_H) / 15); // ~20% for 15 feature rows
-const FEAT_Y = HARM_Y + HARM_H; // feature strip starts after harmonic strip
+const HARM_Y = COCHLEA_H;
+const NOTE_ROWS = 12;
+const NOTE_H = Math.round(CANVAS_H * 0.07);
+const NOTE_ROW_PX = Math.round(NOTE_H / NOTE_ROWS);
+const NOTE_Y = HARM_Y + HARM_H;
+const MFCC_ROWS = 13;
+const MFCC_H = Math.round(CANVAS_H * 0.08);
+const MFCC_ROW_PX = Math.round(MFCC_H / MFCC_ROWS);
+const FEAT_H = CANVAS_H - COCHLEA_H - HARM_H - NOTE_H - MFCC_H;
+const FEAT_ROW_PX = Math.round(FEAT_H / 8);
+const FEAT_Y = NOTE_Y + NOTE_H;
+const MFCC_Y = FEAT_Y + FEAT_H;
 
 const FREQ_LO = 50;
 const FREQ_HI = 16000;
@@ -140,6 +161,7 @@ let featGain = 25;
 
 export function setSensitivity(db) {
   sensitivity = db;
+  featureStore._sensitivity = db;  // share with chroma analysis module
 }
 
 export function setScrollSpeed(px) {
@@ -181,6 +203,27 @@ for (let i = 0; i < 256; i++) {
   cmapLUT[i * 3 + 1] = Math.round(lo[2] + (hi[2] - lo[2]) * f);
   cmapLUT[i * 3 + 2] = Math.round(lo[3] + (hi[3] - lo[3]) * f);
 }
+
+// ── Pitch-class colors for MIDI note view (one hue per semitone, cycling the color wheel) ──
+const PITCH_CLASS_COLORS = [
+  [255, 60, 60],    // C  - red
+  [255, 130, 40],   // C# - orange
+  [240, 200, 40],   // D  - yellow
+  [160, 230, 50],   // D# - yellow-green
+  [60, 210, 70],    // E  - green
+  [40, 200, 150],   // F  - teal
+  [40, 180, 220],   // F# - cyan
+  [60, 120, 240],   // G  - blue
+  [110, 70, 230],   // G# - indigo
+  [170, 60, 220],   // A  - purple
+  [220, 60, 180],   // A# - magenta
+  [240, 60, 120],   // B  - pink
+];
+const NOTE_LABELS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+// ── Timbre space constants ──
+const TIMBRE_SZ = Math.round(Math.min(CANVAS_H * 0.09, CANVAS_W * 0.10));
+const TRAIL_LEN = 120; // 2 seconds at 60fps
 
 // Band thresholds for energy ratio features
 const HIGH_FREQ_BAND = 19; // ~3kHz with 28 bands from 30-20kHz
@@ -309,6 +352,13 @@ function buildLabels() {
   h16Label.style.left = '38px';
   container.appendChild(h16Label);
 
+  // Chroma strip label
+  const chromaLabel = document.createElement('span');
+  chromaLabel.className = 'spec-label feat-label';
+  chromaLabel.textContent = 'notes';
+  chromaLabel.style.top = `${((NOTE_Y + NOTE_H / 2) / CANVAS_H) * 100}%`;
+  container.appendChild(chromaLabel);
+
   // Feature row labels
   const featLabels = [
     'E/flux/sprd', '', '', 'top freq', '', '', '', '',
@@ -322,6 +372,13 @@ function buildLabels() {
     label.style.top = `${pct}%`;
     container.appendChild(label);
   }
+
+  // MFCC strip label
+  const mfccLabel = document.createElement('span');
+  mfccLabel.className = 'spec-label feat-label';
+  mfccLabel.textContent = 'mfcc';
+  mfccLabel.style.top = `${((MFCC_Y + MFCC_H / 2) / CANVAS_H) * 100}%`;
+  container.appendChild(mfccLabel);
 }
 
 export function createSpectrumWall() {
@@ -376,6 +433,29 @@ export function createSpectrumWall() {
   let prevFluxY = -1;
   let prevDerivY = -1;
   let btTempoCounter = 0;
+  let beatPulse = 0;  // smooth 0→1 pulse for beat indicator circle
+  let btPhaseAccuracy = 0;  // smoothed 0→1: how on-time beats land (1 = perfect)
+
+  // ── MFCC adaptive normalization state ──
+  const mfccMin = new Float32Array(13).fill(0);
+  const mfccMax = new Float32Array(13).fill(1);
+  let mfccInitFrames = 0;
+
+  // ── Timbre space trail ──
+  const timbreTrailX = new Float32Array(TRAIL_LEN);
+  const timbreTrailY = new Float32Array(TRAIL_LEN);
+  const timbreTrailR = new Uint8Array(TRAIL_LEN);
+  const timbreTrailG = new Uint8Array(TRAIL_LEN);
+  const timbreTrailB = new Uint8Array(TRAIL_LEN);
+  let trailIdx = 0;
+  let trailCount = 0;
+
+  // ── Key/chord display smoothing ──
+  let displayKey = '';
+  let displayChord = '';
+  let pendingChord = '';
+  let keyHoldFrames = 0;
+  let chordHoldFrames = 0;
 
   // Gaussian weight lookup for ±period window
   function btGaussWeight(dist, period) {
@@ -383,9 +463,8 @@ export function createSpectrumWall() {
     return Math.exp(-0.5 * (dist * dist) / (sigma * sigma));
   }
 
+  const btACorrBuf = new Float32Array(BT_MAX_LAG + 2); // store weighted autocorrelation
   function btEstimateTempo() {
-    // Compute autocorrelation energy at lag 0 for normalization
-    let bestLag = 0, bestCorr = -1;
     for (let lag = BT_MIN_LAG; lag <= BT_MAX_LAG; lag++) {
       let corr = 0;
       const n = BT_BUF_LEN - lag;
@@ -394,10 +473,34 @@ export function createSpectrumWall() {
         const b = (a - lag + BT_BUF_LEN) % BT_BUF_LEN;
         corr += btOdf[a] * btOdf[b];
       }
-      // Rayleigh weighting centered ~120 BPM (lag 30)
-      const r = lag / 30;
-      corr *= r * Math.exp(-0.5 * r * r);
-      if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+      btACorrBuf[lag] = corr;
+    }
+    // Find integer peak
+    let bestLag = BT_MIN_LAG;
+    for (let lag = BT_MIN_LAG + 1; lag <= BT_MAX_LAG; lag++) {
+      if (btACorrBuf[lag] > btACorrBuf[bestLag]) bestLag = lag;
+    }
+    // Octave resolution: if half-lag is in range and is a genuine local peak, prefer faster tempo
+    const halfLag = Math.round(bestLag / 2);
+    if (halfLag >= BT_MIN_LAG + 2 && halfLag <= BT_MAX_LAG - 2) {
+      // Verify half-lag is actually a local peak (not just boundary noise)
+      const isLocalPeak = btACorrBuf[halfLag] > btACorrBuf[halfLag - 1] &&
+                          btACorrBuf[halfLag] > btACorrBuf[halfLag + 1];
+      // Require it to be a local peak AND at least 75% as strong
+      if (isLocalPeak && btACorrBuf[halfLag] > btACorrBuf[bestLag] * 0.75) {
+        bestLag = halfLag;
+      }
+    }
+    // Parabolic interpolation for sub-frame precision
+    if (bestLag > BT_MIN_LAG && bestLag < BT_MAX_LAG) {
+      const prev = btACorrBuf[bestLag - 1];
+      const curr = btACorrBuf[bestLag];
+      const next = btACorrBuf[bestLag + 1];
+      const denom = prev - 2 * curr + next;
+      if (denom < -1e-12) {
+        const shift = 0.5 * (prev - next) / denom;
+        return bestLag + Math.max(-0.5, Math.min(0.5, shift));
+      }
     }
     return bestLag;
   }
@@ -407,6 +510,8 @@ export function createSpectrumWall() {
   // Track previous harmonic amplitudes for temporal derivative
   const prevHarmAmps = new Float32Array(HARM_ROWS);
   const prevGamma = new Float32Array(NUM_FREQ_ROWS);
+  const curGamma = new Float32Array(NUM_FREQ_ROWS);
+  const chordNotes = new Uint8Array(12);
 
   return {
     mesh: null,
@@ -419,7 +524,7 @@ export function createSpectrumWall() {
       const s = storeRef;
 
       // ── Cochleagram via ImageData (pixel-perfect, no fillRect overhead) ──
-      const curGamma = new Float32Array(NUM_FREQ_ROWS);
+      curGamma.fill(0);
       for (let r = 0; r < NUM_FREQ_ROWS; r++) {
         const bin = Math.min(SPECTRUM_BINS - 1, rowBins[r]);
         const raw = (spectrum[bin] + sensitivity - DB_FLOOR) / DB_RANGE;
@@ -801,7 +906,133 @@ export function createSpectrumWall() {
         prevDomY = -1;
       }
 
-      // ── Feature strip (16 rows × 15px) ──
+      // ── MIDI note view (12 rows — scrolling piano roll of detected chord notes) ──
+      // Parse chord to get active pitch classes
+      chordNotes.fill(0);
+      if (s.signalPresent && s.detectedChordConfidence > 0.4 && displayChord) {
+        // Find root note index
+        let rootIdx = -1;
+        let chordSuffix = '';
+        // Try two-char root first (e.g. C#, Db)
+        for (let ni = 0; ni < 12; ni++) {
+          if (displayChord.startsWith(NOTE_LABELS[ni])) {
+            if (NOTE_LABELS[ni].length > 1 || rootIdx < 0) {
+              rootIdx = ni;
+              chordSuffix = displayChord.slice(NOTE_LABELS[ni].length);
+            }
+          }
+        }
+        if (rootIdx >= 0) {
+          // Apply chord template intervals
+          if (chordSuffix === 'm' || chordSuffix === 'm7') {
+            // minor: root, m3, P5
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 3) % 12] = 1;
+            chordNotes[(rootIdx + 7) % 12] = 1;
+            if (chordSuffix === 'm7') chordNotes[(rootIdx + 10) % 12] = 1;
+          } else if (chordSuffix === 'dim') {
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 3) % 12] = 1;
+            chordNotes[(rootIdx + 6) % 12] = 1;
+          } else if (chordSuffix === '7') {
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 4) % 12] = 1;
+            chordNotes[(rootIdx + 7) % 12] = 1;
+            chordNotes[(rootIdx + 10) % 12] = 1;
+          } else {
+            // major: root, M3, P5
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 4) % 12] = 1;
+            chordNotes[(rootIdx + 7) % 12] = 1;
+          }
+        }
+      }
+
+      for (let row = 0; row < NOTE_ROWS; row++) {
+        const energy = Math.max(0, s.chroma[row]);
+        const isChordTone = chordNotes[row] === 1;
+        const [cR, cG, cB] = PITCH_CLASS_COLORS[row];
+        const yTop = NOTE_Y + Math.round((NOTE_ROWS - 1 - row) / NOTE_ROWS * NOTE_H);
+        const yBot = NOTE_Y + Math.round((NOTE_ROWS - row) / NOTE_ROWS * NOTE_H);
+
+        // Threshold: note is "on" if energy > 0.15
+        const noteOn = energy > 0.15 && s.signalPresent;
+
+        if (noteOn && isChordTone) {
+          // Chord tone — pitch-class color at full brightness, boosted by energy
+          const v = Math.min(1, energy * 1.5);
+          ctx.fillStyle = `rgb(${Math.round(cR * v)},${Math.round(cG * v)},${Math.round(cB * v)})`;
+        } else if (noteOn) {
+          // Active but not a chord tone — dim version of pitch-class color
+          const v = Math.min(1, energy) * 0.25;
+          ctx.fillStyle = `rgb(${Math.round(cR * v)},${Math.round(cG * v)},${Math.round(cB * v)})`;
+        } else {
+          // Inactive — very dark
+          ctx.fillStyle = 'rgb(4,4,8)';
+        }
+        ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
+
+        // Thin separator line between rows
+        ctx.fillStyle = 'rgba(30,30,40,1)';
+        ctx.fillRect(rightX, yBot - 1, scrollSpeed, 1);
+      }
+
+      // Key + chord display smoothing
+      // Use a voting window: track how many frames each candidate has been
+      // seen recently, then display the one with the most votes. This is
+      // robust to flickering detection (which resets consecutive-frame counters).
+      if (!s.signalPresent) {
+        displayKey = '';
+        displayChord = '';
+        keyHoldFrames = 0;
+        chordHoldFrames = 0;
+      } else {
+        // Key: update on confidence, use accumulator (already smoothed in chroma.js)
+        if (s.detectedKeyConfidence > 0.3 && s.detectedKey) {
+          displayKey = s.detectedKey;
+        }
+
+        // Chord: require a few consecutive frames to switch, but don't
+        // reset the counter when detection flickers — only reset when a
+        // *different* non-empty chord appears consistently.
+        if (s.detectedChord && s.detectedChordConfidence > 0.3) {
+          if (s.detectedChord === displayChord) {
+            // Current display is confirmed — keep it
+            chordHoldFrames = 0;
+          } else if (s.detectedChord === pendingChord) {
+            // Same new candidate seen again
+            chordHoldFrames++;
+            if (chordHoldFrames > 8) {
+              displayChord = pendingChord;
+              chordHoldFrames = 0;
+            }
+          } else {
+            // New candidate appeared — start counting
+            pendingChord = s.detectedChord;
+            chordHoldFrames = 1;
+          }
+        }
+        // Clear display chord after sustained no-detection (~0.5s)
+        if (!s.detectedChord || s.detectedChordConfidence < 0.1) {
+          chordHoldFrames++;
+          if (chordHoldFrames > 30) {
+            displayChord = '';
+            chordHoldFrames = 0;
+          }
+        }
+      }
+      // Chord text overlay on the note strip
+      if (displayChord && s.signalPresent && btFrameCount % 60 === 0) {
+        const fontSize = Math.round(NOTE_H * 0.38);
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,200,0.8)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(displayChord, rightX - 4, NOTE_Y + NOTE_H / 2);
+        ctx.textAlign = 'left'; // reset
+      }
+
+      // ── Feature strip (8 rows) ──
       // No signalPresent gating — each feature stands on its own values.
       const fY = FEAT_Y;
 
@@ -889,6 +1120,55 @@ export function createSpectrumWall() {
 
       }
 
+      // ── MFCC strip (13 rows — MFCC[0] at bottom, MFCC[12] at top) ──
+      // Adaptive normalization: track running min/max per coefficient
+      mfccInitFrames++;
+      for (let k = 0; k < 13; k++) {
+        const v = s.mfcc[k];
+        if (mfccInitFrames < 30) {
+          // Bootstrap: expand range quickly
+          mfccMin[k] = Math.min(mfccMin[k], v);
+          mfccMax[k] = Math.max(mfccMax[k], v);
+        } else {
+          // Slow adaptation
+          mfccMin[k] += 0.002 * (v - mfccMin[k]);
+          mfccMax[k] -= 0.002 * (mfccMax[k] - v);
+          mfccMin[k] = Math.min(mfccMin[k], v);
+          mfccMax[k] = Math.max(mfccMax[k], v);
+        }
+      }
+
+      for (let row = 0; row < MFCC_ROWS; row++) {
+        const range = mfccMax[row] - mfccMin[row];
+        // Normalize to [-1, 1] centered on midpoint
+        let norm = 0;
+        if (range > 1e-6) {
+          const mid2 = (mfccMax[row] + mfccMin[row]) / 2;
+          norm = (s.mfcc[row] - mid2) / (range / 2);
+          norm = Math.max(-1, Math.min(1, norm));
+        }
+
+        // Diverging colormap: blue (negative) → dark → orange (positive)
+        let mr, mg, mb;
+        if (norm < 0) {
+          const t = Math.min(1, -norm);
+          mr = Math.round(15 * (1 - t));
+          mg = Math.round(40 * t + 15 * (1 - t));
+          mb = Math.round(200 * t + 15 * (1 - t));
+        } else {
+          const t = Math.min(1, norm);
+          mr = Math.round(220 * t + 15 * (1 - t));
+          mg = Math.round(110 * t + 15 * (1 - t));
+          mb = Math.round(15 * (1 - t));
+        }
+
+        ctx.fillStyle = `rgb(${mr},${mg},${mb})`;
+        // row 0 (MFCC[0]) at bottom, row 12 (MFCC[12]) at top
+        const yTop = MFCC_Y + Math.round((MFCC_ROWS - 1 - row) / MFCC_ROWS * MFCC_H);
+        const yBot = MFCC_Y + Math.round((MFCC_ROWS - row) / MFCC_ROWS * MFCC_H);
+        ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
+      }
+
       // ── BTrack beat detection ──
       btFrameCount++;
       const odfVal = s.spectralFlux;
@@ -898,17 +1178,21 @@ export function createSpectrumWall() {
 
       // Compute cumulative score: current ODF + best weighted past score from ~1 period ago
       // Look backward in the score buffer around [period/2, 2*period] for max weighted score
-      const lookStart = Math.round(btPeriod * 0.5);
-      const lookEnd = Math.round(btPeriod * 2);
-      let maxWeighted = 0;
-      for (let i = lookStart; i <= lookEnd; i++) {
-        const pastIdx = (btIdx - i + BT_BUF_LEN) % BT_BUF_LEN;
-        const dist = Math.abs(i - Math.round(btPeriod));
-        const w = btGaussWeight(dist, btPeriod);
-        const val = btCumScore[pastIdx] * w;
-        if (val > maxWeighted) maxWeighted = val;
+      if (btPeriod > 0) {
+        const lookStart = Math.max(1, Math.round(btPeriod * 0.5));
+        const lookEnd = Math.round(btPeriod * 2);
+        let maxWeighted = 0;
+        for (let i = lookStart; i <= lookEnd; i++) {
+          const pastIdx = (btIdx - i + BT_BUF_LEN) % BT_BUF_LEN;
+          const dist = Math.abs(i - Math.round(btPeriod));
+          const w = btGaussWeight(dist, btPeriod);
+          const val = btCumScore[pastIdx] * w;
+          if (val > maxWeighted) maxWeighted = val;
+        }
+        btCumScore[btIdx] = odfVal + maxWeighted;
+      } else {
+        btCumScore[btIdx] = odfVal;
       }
-      btCumScore[btIdx] = odfVal + maxWeighted;
 
       btIdx = (btIdx + 1) % BT_BUF_LEN;
 
@@ -931,10 +1215,14 @@ export function createSpectrumWall() {
         if (beatHadEnergy && btPeriod > 0) {
           btConfirmedBeats++;
           btSilenceTimer = 0;
+          // Phase accuracy: bestOffset=0 means perfect, normalize by period
+          const phaseHit = 1 - Math.min(1, bestOffset / (btPeriod * 0.5));
+          btPhaseAccuracy = btPhaseAccuracy * 0.7 + phaseHit * 0.3;
           // Require 6+ consecutive confirmed beats before showing (~3-4 seconds of steady beat)
           if (btConfirmedBeats >= 6) btShowBeats = true;
           if (btShowBeats) {
             beatFlash = 5;
+            beatPulse = 1;  // trigger pulse for beat indicator
             btLastBeatTime = time;
             btBeatCount++;
             if (btBeatCount % 10 === 0) {
@@ -955,9 +1243,9 @@ export function createSpectrumWall() {
       // Track ODF energy for gating (smooth average of spectral flux variance)
       btOdfEnergy = btOdfEnergy * 0.99 + odfVal * odfVal * 0.01;
 
-      // Re-estimate tempo every ~1 second (always runs)
+      // Re-estimate tempo every ~0.5 seconds (always runs)
       btTempoCounter++;
-      if (btTempoCounter >= 60) {
+      if (btTempoCounter >= 30) {
         btTempoCounter = 0;
         const newPeriod = btEstimateTempo();
         if (newPeriod >= BT_MIN_LAG && newPeriod <= BT_MAX_LAG) {
@@ -965,7 +1253,10 @@ export function createSpectrumWall() {
             btPeriod = newPeriod;
             btCounter = newPeriod;
           } else {
-            btPeriod += 0.12 * (newPeriod - btPeriod);
+            // Adaptive smoothing: fast when far off, slow when locked
+            const err = Math.abs(newPeriod - btPeriod) / btPeriod;
+            const alpha = err > 0.15 ? 0.5 : err > 0.05 ? 0.3 : 0.15;
+            btPeriod += alpha * (newPeriod - btPeriod);
           }
         }
       }
@@ -981,10 +1272,14 @@ export function createSpectrumWall() {
         btCounter = 999;
       }
 
-      // Draw blue vertical beat line — only when btShowBeats is true
+      // Draw vertical beat line — color-coded by phase accuracy
       if (beatFlash > 0 && btShowBeats) {
         beatFlash--;
-        ctx.fillStyle = `rgba(60,140,255,${(beatFlash / 5) * 0.3})`;
+        const pa = btPhaseAccuracy;
+        const bR = Math.round(pa < 0.5 ? 255 : 255 * (1 - (pa - 0.5) * 2));
+        const bG = Math.round(pa < 0.5 ? pa * 2 * 180 : 80 + 175 * (pa - 0.5) * 2);
+        const bB = Math.round(20 * (1 - pa));
+        ctx.fillStyle = `rgba(${bR},${bG},${bB},${(beatFlash / 5) * 0.3})`;
         ctx.fillRect(rightX, 0, scrollSpeed, CANVAS_H);
         if (beatFlash === 4 && btShowBpm > 0) {
           const fontSize = Math.round(CANVAS_H * 0.018);
@@ -1066,6 +1361,263 @@ export function createSpectrumWall() {
             : `${Math.round(v.freq)}`;
           oCtx.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
           oCtx.fillText(freqText, CANVAS_W - 4, cy);
+        }
+      }
+
+      // ── Beat indicator circle (upper-right sidebar) ──
+      // Color encodes phase accuracy: red = unstable, orange = locking, green = phase-locked
+      if (btShowBeats) {
+        const pad = Math.round(16 * DPR);
+        const circR = Math.round(14 * DPR);
+        const bx = CANVAS_W - ARROW_W / 2;
+        const by = pad + circR;
+        const pa = btPhaseAccuracy; // 0..1 phase accuracy
+
+        // Color: red(0) → orange(0.5) → green(1) based on phase accuracy
+        const cR = Math.round(pa < 0.5 ? 255 : 255 * (1 - (pa - 0.5) * 2));
+        const cG = Math.round(pa < 0.5 ? pa * 2 * 180 : 80 + 175 * (pa - 0.5) * 2);
+        const cB = Math.round(20 * (1 - pa));
+
+        if (beatPulse > 0) {
+          const p = beatPulse;
+          const scaleR = Math.round(circR * (0.7 + 0.3 * p));
+          oCtx.beginPath();
+          oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
+          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${p})`;
+          oCtx.fill();
+        }
+      }
+
+      // Decay beat pulse AFTER drawing (so beat frame renders at full 1.0)
+      beatPulse *= 0.88;
+      if (beatPulse < 0.01) beatPulse = 0;
+
+      // ── Circle of Fifths key overlay (bottom-left, above timbre map) ──
+      {
+        const pad = Math.round(8 * DPR);
+        const cofSize = Math.round(Math.min(CANVAS_H * 0.12, CANVAS_W * 0.12));
+        const cofX = pad;
+        const cofY = CANVAS_H - TIMBRE_SZ - cofSize - pad * 3;
+        const cofCx = cofX + cofSize / 2;
+        const cofCy = cofY + cofSize / 2;
+        const outerR = cofSize / 2;
+
+        // Circle of fifths order (starting from top = C)
+        const COF_MAJOR = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'G#', 'D#', 'A#', 'F'];
+        const COF_MINOR = ['Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m', 'Fm', 'Cm', 'Gm', 'Dm'];
+
+        // Parse detected key into CoF index
+        let detKeyIdx = -1;
+        let detKeyIsMajor = true;
+        if (displayKey) {
+          // displayKey is like "C maj", "A min"
+          const parts = displayKey.split(' ');
+          const root = parts[0];
+          const mode = parts[1];
+          if (mode === 'maj') {
+            detKeyIdx = COF_MAJOR.indexOf(root);
+            detKeyIsMajor = true;
+          } else if (mode === 'min') {
+            detKeyIdx = COF_MINOR.indexOf(root + 'm');
+            detKeyIsMajor = false;
+          }
+        }
+
+        // Semi-transparent background circle
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, outerR, 0, Math.PI * 2);
+        oCtx.fillStyle = 'rgba(0,0,0,0.65)';
+        oCtx.fill();
+
+        // Radius ratios for concentric rings
+        const majorR = outerR * 0.85;
+        const minorR = outerR * 0.52;
+        const innerR = outerR * 0.35;
+
+        // Dividing circle between major and minor rings
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, outerR * 0.68, 0, Math.PI * 2);
+        oCtx.strokeStyle = 'rgba(60,60,60,0.5)';
+        oCtx.lineWidth = 1;
+        oCtx.stroke();
+
+        // Inner circle
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, innerR, 0, Math.PI * 2);
+        oCtx.strokeStyle = 'rgba(60,60,60,0.4)';
+        oCtx.stroke();
+
+        // Segment dividers (12 segments, 30° each)
+        for (let i = 0; i < 12; i++) {
+          const angle = (i * 30 - 90 - 15) * Math.PI / 180;
+          oCtx.beginPath();
+          oCtx.moveTo(cofCx + innerR * Math.cos(angle), cofCy + innerR * Math.sin(angle));
+          oCtx.lineTo(cofCx + outerR * Math.cos(angle), cofCy + outerR * Math.sin(angle));
+          oCtx.strokeStyle = 'rgba(50,50,50,0.4)';
+          oCtx.lineWidth = 1;
+          oCtx.stroke();
+        }
+
+        // Highlight detected key segment (use RMS gate, not signalPresent)
+        if (detKeyIdx >= 0 && s.signalPresent) {
+          const startAngle = (detKeyIdx * 30 - 90 - 15) * Math.PI / 180;
+          const endAngle = (detKeyIdx * 30 - 90 + 15) * Math.PI / 180;
+          const hlR = detKeyIsMajor ? outerR : outerR * 0.68;
+          const hlInner = detKeyIsMajor ? outerR * 0.68 : innerR;
+
+          oCtx.beginPath();
+          oCtx.arc(cofCx, cofCy, hlR, startAngle, endAngle);
+          oCtx.arc(cofCx, cofCy, hlInner, endAngle, startAngle, true);
+          oCtx.closePath();
+          oCtx.fillStyle = 'rgba(80,180,255,0.45)';
+          oCtx.fill();
+        }
+
+        // Key labels
+        const majFontSz = Math.max(6, Math.round(cofSize * 0.08));
+        const minFontSz = Math.max(5, Math.round(cofSize * 0.065));
+
+        for (let i = 0; i < 12; i++) {
+          const angle = (i * 30 - 90) * Math.PI / 180;
+
+          // Major key label (outer ring)
+          const mx = cofCx + majorR * Math.cos(angle);
+          const my = cofCy + majorR * Math.sin(angle);
+          oCtx.font = `${detKeyIdx === i && detKeyIsMajor ? 'bold ' : ''}${majFontSz}px sans-serif`;
+          oCtx.textAlign = 'center';
+          oCtx.textBaseline = 'middle';
+          oCtx.fillStyle = detKeyIdx === i && detKeyIsMajor
+            ? 'rgba(140,220,255,0.95)'
+            : 'rgba(180,180,180,0.6)';
+          oCtx.fillText(COF_MAJOR[i], mx, my);
+
+          // Minor key label (inner ring)
+          const nx = cofCx + minorR * Math.cos(angle);
+          const ny = cofCy + minorR * Math.sin(angle);
+          oCtx.font = `${detKeyIdx === i && !detKeyIsMajor ? 'bold ' : ''}${minFontSz}px sans-serif`;
+          oCtx.fillStyle = detKeyIdx === i && !detKeyIsMajor
+            ? 'rgba(140,220,255,0.95)'
+            : 'rgba(140,140,140,0.5)';
+          oCtx.fillText(COF_MINOR[i], nx, ny);
+        }
+
+        // Center: show detected chord
+        if (displayChord && s.signalPresent) {
+          const chordFontSz = Math.max(7, Math.round(cofSize * 0.12));
+          oCtx.font = `bold ${chordFontSz}px sans-serif`;
+          oCtx.textAlign = 'center';
+          oCtx.textBaseline = 'middle';
+          oCtx.fillStyle = 'rgba(255,255,200,0.9)';
+          oCtx.fillText(displayChord, cofCx, cofCy);
+        }
+
+        // Outer ring border
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, outerR, 0, Math.PI * 2);
+        oCtx.strokeStyle = 'rgba(100,100,100,0.5)';
+        oCtx.lineWidth = 1;
+        oCtx.stroke();
+      }
+
+      // ── Timbre space overlay (bottom-left corner on overlay canvas) ──
+      // X = spectral centroid (brightness), Y = MFCC[1] (spectral tilt)
+      // Dot color = tristimulus (T1=R, T2=G, T3=B)
+      {
+        const pad = Math.round(8 * DPR);
+        const boxX = pad;
+        const boxY = CANVAS_H - TIMBRE_SZ - pad;
+        const boxW = TIMBRE_SZ;
+        const boxH = TIMBRE_SZ;
+
+        // Semi-transparent background
+        oCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        oCtx.fillRect(boxX, boxY, boxW, boxH);
+        oCtx.strokeStyle = 'rgba(100,100,100,0.5)';
+        oCtx.lineWidth = 1;
+        oCtx.strokeRect(boxX, boxY, boxW, boxH);
+
+        // Crosshair at center
+        const cx = boxX + boxW / 2;
+        const cy2 = boxY + boxH / 2;
+        oCtx.strokeStyle = 'rgba(60,60,60,0.6)';
+        oCtx.beginPath();
+        oCtx.moveTo(boxX, cy2);
+        oCtx.lineTo(boxX + boxW, cy2);
+        oCtx.moveTo(cx, boxY);
+        oCtx.lineTo(cx, boxY + boxH);
+        oCtx.stroke();
+
+        // Compute normalized position
+        // X: spectral centroid — log scale, 200Hz=left, 8000Hz=right
+        const centroidLog = s.spectralCentroidSmooth > 0
+          ? Math.log(Math.max(200, Math.min(8000, s.spectralCentroidSmooth)) / 200) / Math.log(8000 / 200)
+          : 0.5;
+        // Y: MFCC[1] — normalized adaptively (larger = warmer = bottom)
+        const mfcc1range = mfccMax[1] - mfccMin[1];
+        const mfcc1norm = mfcc1range > 1e-6
+          ? (s.mfcc[1] - mfccMin[1]) / mfcc1range
+          : 0.5;
+
+        const dotX = boxX + centroidLog * boxW;
+        const dotY = boxY + (1 - mfcc1norm) * boxH; // invert so "warm" is at bottom
+
+        // Update trail
+        if (s.signalPresent && s.rmsSmooth > 0.003) {
+          timbreTrailX[trailIdx] = dotX;
+          timbreTrailY[trailIdx] = dotY;
+          timbreTrailR[trailIdx] = Math.round(s.tristimulus[0] * 255);
+          timbreTrailG[trailIdx] = Math.round(s.tristimulus[1] * 255);
+          timbreTrailB[trailIdx] = Math.round(s.tristimulus[2] * 255);
+          trailIdx = (trailIdx + 1) % TRAIL_LEN;
+          if (trailCount < TRAIL_LEN) trailCount++;
+        }
+
+        // Draw trail (fading dots)
+        for (let i = 0; i < trailCount; i++) {
+          const idx = (trailIdx - 1 - i + TRAIL_LEN) % TRAIL_LEN;
+          const age = i / TRAIL_LEN;
+          const alpha = (1 - age) * 0.4;
+          if (alpha < 0.02) continue;
+
+          // Color from stored tristimulus at time of recording
+          oCtx.fillStyle = `rgba(${timbreTrailR[idx]},${timbreTrailG[idx]},${timbreTrailB[idx]},${alpha})`;
+
+          const sz = Math.max(2, Math.round(3 * DPR * (1 - age * 0.5)));
+          oCtx.fillRect(timbreTrailX[idx] - sz / 2, timbreTrailY[idx] - sz / 2, sz, sz);
+        }
+
+        // Current dot (bright, larger)
+        if (s.signalPresent && s.rmsSmooth > 0.003) {
+          const tR = Math.min(255, Math.round(s.tristimulus[0] * 300 + 60));
+          const tG = Math.min(255, Math.round(s.tristimulus[1] * 300 + 60));
+          const tB = Math.min(255, Math.round(s.tristimulus[2] * 300 + 60));
+          const dotSz = Math.round(5 * DPR);
+          // White border
+          oCtx.fillStyle = 'rgba(255,255,255,0.9)';
+          oCtx.fillRect(dotX - dotSz / 2 - 1, dotY - dotSz / 2 - 1, dotSz + 2, dotSz + 2);
+          // Colored fill
+          oCtx.fillStyle = `rgb(${tR},${tG},${tB})`;
+          oCtx.fillRect(dotX - dotSz / 2, dotY - dotSz / 2, dotSz, dotSz);
+        }
+
+        // Axis labels
+        const lblSz = Math.round(CANVAS_H * 0.008);
+        oCtx.font = `${lblSz}px sans-serif`;
+        oCtx.textAlign = 'left';
+        oCtx.textBaseline = 'bottom';
+        oCtx.fillStyle = 'rgba(180,180,180,0.6)';
+        oCtx.fillText('bright →', boxX + 2, boxY + boxH - 2);
+        oCtx.save();
+        oCtx.translate(boxX + lblSz, boxY + boxH - lblSz);
+        oCtx.rotate(-Math.PI / 2);
+        oCtx.fillText('warm →', 0, 0);
+        oCtx.restore();
+
+        // Inharmonicity indicator — small bar at the bottom of the box
+        if (s.inharmonicity > 0.001) {
+          const barW = Math.round(Math.min(1, s.inharmonicity * 10) * boxW);
+          oCtx.fillStyle = `rgba(255,160,40,${Math.min(0.8, s.inharmonicity * 5)})`;
+          oCtx.fillRect(boxX, boxY + boxH - 3, barW, 3);
         }
       }
     },

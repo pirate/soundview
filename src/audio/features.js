@@ -6,6 +6,8 @@ import { bands } from './filterbank.js';
 import { detectPitch } from './pitch.js';
 import { updateModulation } from './modulation.js';
 import { initFormants, detectFormants } from './formants.js';
+import { initChroma, updateChroma, resetChroma } from './chroma.js';
+import { initTimbre, updateTimbre } from './timbre.js';
 
 // ── Smoothing constants ──
 const SMOOTH_ATTACK = 0.3;
@@ -43,6 +45,8 @@ export function initFeatures(analyser, sr) {
   store.noiseFloor = 0.01;
 
   initFormants(sr, analyser.fftSize);
+  initChroma(sr, analyser.fftSize);
+  initTimbre(sr, analyser.fftSize);
 }
 
 export function updateFeatures() {
@@ -148,12 +152,19 @@ export function updateFeatures() {
   // ══════════════════════════════════════════════════
   // 3. NOISE FLOOR ESTIMATION
   // ══════════════════════════════════════════════════
-  // Slowly adapt toward current RMS (tracks ambient level)
-  if (store.rms < store.noiseFloor * 1.5) {
-    store.noiseFloor += NOISE_FLOOR_ADAPT * (store.rms - store.noiseFloor);
+  // Track the noise floor as the minimum sustained level. The floor should
+  // only adapt *downward* toward quieter levels (true ambient noise), never
+  // upward toward louder signal. The old logic adapted toward RMS whenever
+  // rms < noiseFloor * 1.5, which caused the floor to converge on constant-
+  // level audio (system loopback, browser playback) making signalPresent
+  // permanently false.
+  if (store.rms < store.noiseFloor) {
+    // Current level is below floor — adapt down quickly (found quieter ambient)
+    store.noiseFloor += NOISE_FLOOR_ADAPT * 2 * (store.rms - store.noiseFloor);
   } else {
-    // Signal is well above noise floor, decay very slowly
-    store.noiseFloor *= (1 - NOISE_FLOOR_ADAPT * 0.1);
+    // Current level is above floor — rise very slowly (accounts for gradual
+    // ambient changes) but never fast enough to track actual signal
+    store.noiseFloor += NOISE_FLOOR_ADAPT * 0.05 * (store.rms - store.noiseFloor);
   }
   store.noiseFloor = Math.max(store.noiseFloor, 1e-5);
 
@@ -335,6 +346,9 @@ export function updateFeatures() {
       ? Math.min(harmonicPower / totalSpecPower, 1)
       : 0;
 
+    // Save raw amplitudes before normalization (for timbre analysis)
+    store.harmonicAmplitudesRaw.set(store.harmonicAmplitudes);
+
     // Normalize harmonic amplitudes relative to fundamental
     const fundAmp = store.harmonicAmplitudes[0];
     if (fundAmp > 1e-15) {
@@ -427,12 +441,36 @@ export function updateFeatures() {
   detectFormants();
 
   // ══════════════════════════════════════════════════
-  // 11. ADVANCE HISTORY INDEX
+  // 11. CHROMA + KEY/CHORD DETECTION
+  // ══════════════════════════════════════════════════
+  updateChroma();
+
+  // ══════════════════════════════════════════════════
+  // 12. TIMBRE DESCRIPTORS (MFCCs, tristimulus, inharmonicity)
+  // ══════════════════════════════════════════════════
+  updateTimbre();
+
+  // Reset key/chord detector state after sustained silence (~2s at 60fps).
+  if (!store.signalPresent) {
+    store._silenceFrames = (store._silenceFrames || 0) + 1;
+    if (store._silenceFrames > 120) {
+      resetChroma();
+      store.detectedKey = '';
+      store.detectedKeyConfidence = 0;
+      store.detectedChord = '';
+      store.detectedChordConfidence = 0;
+    }
+  } else {
+    store._silenceFrames = 0;
+  }
+
+  // ══════════════════════════════════════════════════
+  // 13. ADVANCE HISTORY INDEX
   // ══════════════════════════════════════════════════
   store.historyIndex = (store.historyIndex + 1) % HISTORY_LEN;
 
   // ══════════════════════════════════════════════════
-  // 12. PER-BAND MODULATION SPECTRUM
+  // 14. PER-BAND MODULATION SPECTRUM
   // ══════════════════════════════════════════════════
   updateModulation();
 }

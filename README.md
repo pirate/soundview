@@ -103,6 +103,26 @@ Additional dimensions encoded:
 
 Harmonics are computed from the store's autocorrelation-based pitch, with fallback to the strongest voice from multi-pitch detection (works for music through speakers, not just direct voice).
 
+### MIDI Note Strip (~7% of screen)
+Scrolling piano-roll-style view of detected chord notes, with 12 rows (one per pitch class, C at bottom, B at top):
+
+- **Chord tones** light up in their pitch-class color (C=red, C#=orange, D=yellow, D#=yellow-green, E=green, F=teal, F#=cyan, G=blue, G#=indigo, A=purple, A#=magenta, B=pink) at full brightness proportional to chroma energy
+- **Non-chord active notes** shown as dim versions of their pitch-class color
+- **Inactive notes** are near-black, creating a clear on/off MIDI-note appearance
+- **Chord name** overlaid as text on the strip every ~1 second
+
+Under the hood, chromagram energy (12 pitch-class bins folded from the FFT spectrum) is thresholded and compared against detected chord templates (major, minor, diminished, dominant 7th, minor 7th) to determine which notes belong to the current chord.
+
+### Circle of Fifths (overlay, bottom-left)
+Interactive key detection visualization rendered on the overlay canvas above the timbre space map:
+
+- **Outer ring**: 12 major keys arranged in circle-of-fifths order (C at top, clockwise: C→G→D→A→E→B→F#→C#→G#→D#→A#→F)
+- **Inner ring**: 12 relative minor keys (Am at top, following the same fifths order)
+- **Highlight**: The detected key segment lights up blue when confident
+- **Center**: Shows the currently detected chord name
+- **Key detection**: Krumhansl-Kessler key profiles matched against the chromagram via Pearson correlation, with a slow accumulator for stability (updates ~4× per second)
+- **Chord detection**: Cosine similarity matching against chord templates (major, minor, dim, dom7, min7), updated every frame for responsiveness
+
 ### Feature Strip (bottom ~15% of screen)
 
 **Energy/Spread/Flux band** (3 rows):
@@ -123,6 +143,23 @@ Colors match between arrows and their corresponding lines on the cochleagram and
 - Blue: 2nd voice
 - Green: 3rd voice
 - Magenta: 4th voice
+
+### Timbre Space Map (overlay, bottom-left)
+2D scatter plot showing timbral characteristics as a moving dot with a fading trail:
+
+- **X axis**: Spectral centroid (log scale, 200Hz–8kHz) — left=dark, right=bright
+- **Y axis**: MFCC[1] (spectral tilt, adaptive normalization) — bottom=warm, top=cold
+- **Dot color**: Tristimulus (T1=red=fundamental dominance, T2=green=mid harmonics H2-H4, T3=blue=upper partials H5+). Each trail point stores its own tristimulus color from the time it was recorded
+- **Inharmonicity bar**: Orange bar at bottom edge, length proportional to harmonic deviation
+- Computed from raw (un-normalized) harmonic amplitudes for accurate energy ratios
+
+### MFCC Strip (~8% of screen)
+13 rows showing Mel-Frequency Cepstral Coefficients with a diverging blue↔orange colormap:
+
+- Adaptive normalization tracks min/max per coefficient over time
+- MFCC[0] (bottom) represents overall spectral energy level
+- Higher MFCCs capture increasingly fine spectral envelope detail
+- Useful for distinguishing vowel sounds, instrument timbres, and speech vs music
 
 ## Audio Analysis Pipeline
 
@@ -146,6 +183,22 @@ Per-frame feature extraction (~400 lines):
 - Harmonicity + 32 harmonic amplitudes (normalized to fundamental)
 - Modulation depth/rate from envelope analysis
 - Onset detection (spectral flux with adaptive median threshold)
+- Chromagram, key/chord detection (delegated to `chroma.js`)
+- Timbre descriptors (delegated to `timbre.js`)
+- Clears key/chord state during silence
+
+### `src/audio/chroma.js`
+Chromagram computation + key/chord detection:
+- Folds FFT spectrum into 12 pitch-class bins (HPCP) across the 60–5000Hz range
+- Log-scales chroma energy using the same dB floor/range approach as the cochleagram, with the sensitivity slider applied for consistent brightness control
+- Key detection via Pearson correlation against Krumhansl-Kessler major/minor profiles, with a slow accumulator (updates every 15 frames)
+- Chord detection via cosine similarity against 5 chord templates (major, minor, dim, dom7, min7), every frame
+
+### `src/audio/timbre.js`
+Timbre descriptors:
+- 13 MFCCs via 26-band mel filterbank → log compression → DCT-II
+- Tristimulus (T1/T2/T3) from raw harmonic amplitudes (fundamental, mid harmonics H2-H4, upper partials H5+), decays toward zero when no pitch is detected
+- Inharmonicity: weighted deviation of actual partial frequencies from perfect harmonic series
 
 ### `src/audio/modulation.js`
 Per-band modulation spectrum via 64-point FFT of envelope history. 7 modulation bands from <1Hz to roughness (30-300Hz). Runs every 4th frame.
@@ -164,16 +217,18 @@ Shared typed-array data bus. All audio features written by the analysis pipeline
 Minimal render loop using `performance.now()` for timing. No Three.js — pure 2D canvas.
 
 ### `src/scene/layers/spectrum-wall.js`
-The main renderer (~1000 lines). Creates two canvases:
-1. **Spectrogram canvas**: scrolling cochleagram + harmonics + feature strip, rendered with ImageData for pixel-perfect output
-2. **Overlay canvas**: voice arrows, cleared each frame
+The main renderer (~1400 lines). Creates two canvases:
+1. **Spectrogram canvas**: scrolling cochleagram + harmonics + MIDI note strip + feature strip + MFCC strip, rendered with ImageData for pixel-perfect output
+2. **Overlay canvas**: voice arrows, Circle of Fifths key display, timbre space map — cleared each frame
 
 Also contains:
 - Multi-pitch detection via subharmonic summation
-- Top-frequency extraction (iterative argmax with suppression + merge, ported from a Python visualizer)
+- Top-frequency extraction (iterative argmax with suppression + merge)
 - Simple instrument classifier
 - BTrack beat tracker
 - Noise fuzz renderer
+- Chord-to-pitch-class parsing for MIDI note highlighting
+- Circle of Fifths rendering with key/chord detection display
 
 ---
 

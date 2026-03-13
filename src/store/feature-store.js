@@ -65,6 +65,7 @@ export const store = {
 
   // ── Harmonic structure ──
   harmonicAmplitudes: new Float32Array(32),
+  harmonicAmplitudesRaw: new Float32Array(32),  // raw power (before normalization)
 
   // ── Formants ──
   formant1: 0,           // F1 frequency (Hz), 0 = not detected
@@ -82,4 +83,19 @@ export const store = {
   // ── Spectral flux ──
   spectralFlux: 0,       // rate of spectral change (0-1)
   spectralFluxSmooth: 0,
+
+  // ── Sensitivity (set by UI, shared with chroma for consistent brightness) ──
+  _sensitivity: -12,
+
+  // ── Chroma / Key / Chord ──
+  chroma: new Float32Array(12),        // 12 pitch-class energies (C, C#, D, ..., B), normalized 0-1
+  detectedKey: '',                     // e.g. "A min", "C maj"
+  detectedKeyConfidence: 0,
+  detectedChord: '',                   // e.g. "Am", "C", "G7"
+  detectedChordConfidence: 0,
+
+  // ── Timbre (MFCCs + Tristimulus + Inharmonicity) ──
+  mfcc: new Float32Array(13),          // 13 mel-frequency cepstral coefficients
+  tristimulus: new Float32Array(3),    // T1 (fundamental), T2 (H2-H4), T3 (H5+)
+  inharmonicity: 0,                    // deviation of partials from harmonic series
 };
