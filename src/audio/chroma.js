@@ -28,6 +28,7 @@ let fftSize = 8192;
 let keyFrameCounter = 0;
 let silenceFrames = 0; // consecutive frames without signal
 const keyAccum = new Float32Array(24); // smoothed correlations for 12 major + 12 minor
+const detChroma = new Float32Array(12); // harmonic-compensated chroma for detection
 
 export function initChroma(sr, fft) {
   sampleRate = sr;
@@ -85,6 +86,16 @@ export function updateChroma() {
     store.chroma[i] += alpha * (rawChroma[i] - store.chroma[i]);
   }
 
+  // Harmonic leakage compensation for detection (not display).
+  // A note's 3rd harmonic lands +7 semitones up in pitch-class space
+  // (e.g. E's 3rd harmonic = B). This causes false energy in related
+  // pitch classes, confusing chords like C major vs Em. Subtract an
+  // estimate of the leaked energy before running detection.
+  for (let i = 0; i < 12; i++) {
+    const source = store.chroma[(i + 5) % 12]; // bin whose 3rd harmonic falls here
+    detChroma[i] = Math.max(0, store.chroma[i] - source * 0.25);
+  }
+
   // Key detection — update every 15 frames (~4× per second) for stability
   keyFrameCounter++;
   if (keyFrameCounter >= 15 && store.signalPresent) {
@@ -103,8 +114,8 @@ function detectKey() {
   let bestCorr = -Infinity, bestRoot = 0, bestMode = 0;
 
   for (let root = 0; root < 12; root++) {
-    const corrMaj = pearson(store.chroma, MAJOR_PROFILE, root);
-    const corrMin = pearson(store.chroma, MINOR_PROFILE, root);
+    const corrMaj = pearson(detChroma, MAJOR_PROFILE, root);
+    const corrMin = pearson(detChroma, MINOR_PROFILE, root);
 
     // Slow accumulator for key stability
     keyAccum[root] += 0.15 * (corrMaj - keyAccum[root]);
@@ -127,12 +138,12 @@ function detectChord() {
   // Threshold is relative to the max chroma value so it works at any volume.
   let chMax = 0;
   for (let i = 0; i < 12; i++) {
-    if (store.chroma[i] > chMax) chMax = store.chroma[i];
+    if (detChroma[i] > chMax) chMax = detChroma[i];
   }
   const ACTIVE_THRESHOLD = chMax * 0.2; // 20% of max
   let activeCount = 0;
   for (let i = 0; i < 12; i++) {
-    if (store.chroma[i] > ACTIVE_THRESHOLD) activeCount++;
+    if (detChroma[i] > ACTIVE_THRESHOLD) activeCount++;
   }
   if (activeCount < 3) {
     store.detectedChord = '';
@@ -144,7 +155,7 @@ function detectChord() {
 
   for (const chord of CHORD_TYPES) {
     for (let root = 0; root < 12; root++) {
-      const corr = pearson(store.chroma, chord.bits, root);
+      const corr = pearson(detChroma, chord.bits, root);
       if (corr > bestCorr) {
         bestCorr = corr;
         bestName = NOTE_NAMES[root] + chord.name;
@@ -166,12 +177,12 @@ function detectChord() {
   // parent triad (or vice versa). Verify the 7th note is actually prominent
   // relative to the other chord tones; if not, downgrade to the triad.
   if (bestChord && (bestChord.name === '7' || bestChord.name === 'm7')) {
-    const seventhEnergy = store.chroma[(bestRoot + 10) % 12];
+    const seventhEnergy = detChroma[(bestRoot + 10) % 12];
     // Average energy of the triad tones (root, 3rd, 5th)
     const thirdIdx = bestChord.name === '7' ? 4 : 3; // major vs minor 3rd
-    const triadAvg = (store.chroma[bestRoot % 12] +
-                      store.chroma[(bestRoot + thirdIdx) % 12] +
-                      store.chroma[(bestRoot + 7) % 12]) / 3;
+    const triadAvg = (detChroma[bestRoot % 12] +
+                      detChroma[(bestRoot + thirdIdx) % 12] +
+                      detChroma[(bestRoot + 7) % 12]) / 3;
     // Require the 7th to be at least 30% of the average triad-tone energy
     if (seventhEnergy < triadAvg * 0.3) {
       bestName = NOTE_NAMES[bestRoot] + (bestChord.name === '7' ? '' : 'm');
