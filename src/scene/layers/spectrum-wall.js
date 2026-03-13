@@ -1256,10 +1256,6 @@ export function createSpectrumWall() {
         btCounter = 999;
       }
 
-      // Decay beat pulse (exponential decay for smooth animation)
-      beatPulse *= 0.88;
-      if (beatPulse < 0.01) beatPulse = 0;
-
       // Draw vertical beat line — color-coded by phase accuracy
       if (beatFlash > 0 && btShowBeats) {
         beatFlash--;
@@ -1367,26 +1363,27 @@ export function createSpectrumWall() {
         const cB = Math.round(20 * (1 - pa));
 
         if (beatPulse > 0) {
-          // Shrink + fade out: starts at full size, shrinks and fades to nothing
           const p = beatPulse;
 
-          // Outer glow — shrinks and fades
-          const glowR = circR + Math.round(circR * p * 0.6);
+          // Outer glow — fades out
+          const glowR = circR + Math.round(6 * DPR);
           oCtx.beginPath();
           oCtx.arc(bx, by, glowR, 0, Math.PI * 2);
           oCtx.fillStyle = `rgba(${cR},${cG},${cB},${p * 0.3})`;
           oCtx.fill();
 
-          // Main circle — shrinks from full to zero, brightness fades
-          const scaleR = Math.round(circR * p);
-          if (scaleR > 0) {
-            oCtx.beginPath();
-            oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
-            oCtx.fillStyle = `rgb(${Math.min(255, cR + Math.round((255 - cR) * p))},${Math.min(255, cG + Math.round((255 - cG) * p))},${Math.min(255, cB + Math.round((255 - cB) * p))})`;
-            oCtx.fill();
-          }
+          // Main circle — starts at full size, slight shrink on fade-out
+          const scaleR = Math.round(circR * (0.7 + 0.3 * p));
+          oCtx.beginPath();
+          oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
+          oCtx.fillStyle = `rgba(${Math.min(255, cR + Math.round((255 - cR) * p))},${Math.min(255, cG + Math.round((255 - cG) * p))},${Math.min(255, cB + Math.round((255 - cB) * p))},${p})`;
+          oCtx.fill();
         }
       }
+
+      // Decay beat pulse AFTER drawing (so beat frame renders at full 1.0)
+      beatPulse *= 0.88;
+      if (beatPulse < 0.01) beatPulse = 0;
 
       // ── Circle of Fifths key overlay (bottom-left, above timbre map) ──
       {
