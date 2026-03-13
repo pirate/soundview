@@ -62,10 +62,11 @@ export function updateChroma() {
   }
 
   // Log-scale then linearly rescale to 0-1 (no auto-ranging).
-  // Convert summed power to dB, then map to 0-1 using fixed floor/range.
+  // Sensitivity offset shifts the effective noise gate — higher sensitivity
+  // lets quieter notes through into both detection and display.
   for (let i = 0; i < 12; i++) {
     const db = rawChroma[i] > 1e-15 ? 10 * Math.log10(rawChroma[i]) : -150;
-    const norm = (db - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
+    const norm = (db + store._sensitivity - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
     rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
 
