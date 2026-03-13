@@ -1364,19 +1364,10 @@ export function createSpectrumWall() {
 
         if (beatPulse > 0) {
           const p = beatPulse;
-
-          // Outer glow — fades out
-          const glowR = circR + Math.round(6 * DPR);
-          oCtx.beginPath();
-          oCtx.arc(bx, by, glowR, 0, Math.PI * 2);
-          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${p * 0.3})`;
-          oCtx.fill();
-
-          // Main circle — starts at full size, slight shrink on fade-out
           const scaleR = Math.round(circR * (0.7 + 0.3 * p));
           oCtx.beginPath();
           oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
-          oCtx.fillStyle = `rgba(${Math.min(255, cR + Math.round((255 - cR) * p))},${Math.min(255, cG + Math.round((255 - cG) * p))},${Math.min(255, cB + Math.round((255 - cB) * p))},${p})`;
+          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${p})`;
           oCtx.fill();
         }
       }
