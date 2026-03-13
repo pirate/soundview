@@ -140,18 +140,16 @@ function detectChord() {
     return;
   }
 
-  let bestCorr = -Infinity, bestName = '';
+  let bestCorr = -Infinity, bestName = '', bestChord = null, bestRoot = 0;
 
   for (const chord of CHORD_TYPES) {
     for (let root = 0; root < 12; root++) {
-      // Use Pearson correlation (same as key detection) instead of cosine
-      // similarity. Pearson subtracts the mean, so energy in non-chord-tone
-      // bins actively hurts the score — cosine ignores it, which causes
-      // random jumping with spectrally busy signals like house music.
       const corr = pearson(store.chroma, chord.bits, root);
       if (corr > bestCorr) {
         bestCorr = corr;
         bestName = NOTE_NAMES[root] + chord.name;
+        bestChord = chord;
+        bestRoot = root;
       }
     }
   }
@@ -161,6 +159,23 @@ function detectChord() {
     store.detectedChord = '';
     store.detectedChordConfidence = 0;
     return;
+  }
+
+  // 7th chord validation: Pearson correlation treats all template positions
+  // equally, so noise in the 7th degree can push a 7th chord above its
+  // parent triad (or vice versa). Verify the 7th note is actually prominent
+  // relative to the other chord tones; if not, downgrade to the triad.
+  if (bestChord && (bestChord.name === '7' || bestChord.name === 'm7')) {
+    const seventhEnergy = store.chroma[(bestRoot + 10) % 12];
+    // Average energy of the triad tones (root, 3rd, 5th)
+    const thirdIdx = bestChord.name === '7' ? 4 : 3; // major vs minor 3rd
+    const triadAvg = (store.chroma[bestRoot % 12] +
+                      store.chroma[(bestRoot + thirdIdx) % 12] +
+                      store.chroma[(bestRoot + 7) % 12]) / 3;
+    // Require the 7th to be at least 30% of the average triad-tone energy
+    if (seventhEnergy < triadAvg * 0.3) {
+      bestName = NOTE_NAMES[bestRoot] + (bestChord.name === '7' ? '' : 'm');
+    }
   }
 
   store.detectedChord = bestName;
