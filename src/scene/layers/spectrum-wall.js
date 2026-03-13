@@ -969,7 +969,9 @@ export function createSpectrumWall() {
       // Use a voting window: track how many frames each candidate has been
       // seen recently, then display the one with the most votes. This is
       // robust to flickering detection (which resets consecutive-frame counters).
-      if (!s.signalPresent) {
+      // Gate on absolute RMS — signalPresent can falsely report no signal
+      // when the adaptive noise floor drifts up to match system audio levels.
+      if (s.rms < 0.001) {
         displayKey = '';
         displayChord = '';
         keyHoldFrames = 0;
@@ -1009,8 +1011,8 @@ export function createSpectrumWall() {
           }
         }
       }
-      // Chord text overlay on the note strip — only when signal is present
-      if (displayChord && s.signalPresent && btFrameCount % 60 === 0) {
+      // Chord text overlay on the note strip
+      if (displayChord && btFrameCount % 60 === 0) {
         const fontSize = Math.round(NOTE_H * 0.38);
         ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.fillStyle = 'rgba(255,255,200,0.8)';
@@ -1454,8 +1456,8 @@ export function createSpectrumWall() {
           oCtx.stroke();
         }
 
-        // Highlight detected key segment
-        if (detKeyIdx >= 0 && s.signalPresent) {
+        // Highlight detected key segment (use RMS gate, not signalPresent)
+        if (detKeyIdx >= 0 && s.rms > 0.001) {
           const startAngle = (detKeyIdx * 30 - 90 - 15) * Math.PI / 180;
           const endAngle = (detKeyIdx * 30 - 90 + 15) * Math.PI / 180;
           const hlR = detKeyIsMajor ? outerR : outerR * 0.68;
@@ -1498,7 +1500,7 @@ export function createSpectrumWall() {
         }
 
         // Center: show detected chord
-        if (displayChord && s.signalPresent) {
+        if (displayChord && s.rms > 0.001) {
           const chordFontSz = Math.max(7, Math.round(cofSize * 0.12));
           oCtx.font = `bold ${chordFontSz}px sans-serif`;
           oCtx.textAlign = 'center';

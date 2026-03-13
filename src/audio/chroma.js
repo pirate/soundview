@@ -85,28 +85,24 @@ export function updateChroma() {
     store.chroma[i] += alpha * (rawChroma[i] - store.chroma[i]);
   }
 
+  // Use absolute RMS threshold for chroma gate. The adaptive signalPresent
+  // flag uses noise floor tracking that can drift up to match constant-level
+  // system audio, falsely reporting "no signal" despite obvious energy.
+  // RMS > 0.001 reliably distinguishes real audio from true silence.
+  const hasAudio = store.rms > 0.001;
+
   // Key detection — update every 15 frames (~4× per second) for stability
   keyFrameCounter++;
-  if (keyFrameCounter >= 15 && store.signalPresent) {
+  if (keyFrameCounter >= 15 && hasAudio) {
     keyFrameCounter = 0;
     detectKey();
   }
 
   // Chord detection — every frame for responsiveness
-  if (store.signalPresent) {
+  if (hasAudio) {
     detectChord();
   }
 
-  // Debug: log chroma state every 120 frames (always, regardless of signal)
-  if (typeof updateChroma._dbg === 'undefined') updateChroma._dbg = 0;
-  if (++updateChroma._dbg % 120 === 0) {
-    const chromaStr = Array.from(store.chroma).map(v => v.toFixed(2)).join(',');
-    console.log('CHROMA-DBG chroma:', chromaStr,
-      '| key:', store.detectedKey, 'conf:', store.detectedKeyConfidence.toFixed(3),
-      '| chord:', store.detectedChord, 'conf:', store.detectedChordConfidence.toFixed(3),
-      '| signal:', store.signalPresent, 'rms:', store.rms.toFixed(5),
-      '| aboveNoise:', store.signalAboveNoise.toFixed(1));
-  }
 }
 
 function detectKey() {
@@ -134,7 +130,12 @@ function detectKey() {
 
 function detectChord() {
   // Require at least 3 active pitch classes — a chord needs multiple notes.
-  const ACTIVE_THRESHOLD = 0.1;
+  // Threshold is relative to the max chroma value so it works at any volume.
+  let chMax = 0;
+  for (let i = 0; i < 12; i++) {
+    if (store.chroma[i] > chMax) chMax = store.chroma[i];
+  }
+  const ACTIVE_THRESHOLD = chMax * 0.2; // 20% of max
   let activeCount = 0;
   for (let i = 0; i < 12; i++) {
     if (store.chroma[i] > ACTIVE_THRESHOLD) activeCount++;
