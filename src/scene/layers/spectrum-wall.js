@@ -1,4 +1,5 @@
-// Fullscreen scrolling cochleagram + harmonic profile + feature strip + voice circles.
+// Fullscreen scrolling cochleagram + harmonic profile + MIDI note strip + feature strip +
+// MFCC strip + overlays (Circle of Fifths, timbre space, voice arrows).
 // Pure 2D canvas rendering — no WebGL/Three.js.
 
 import { SPECTRUM_BINS, NUM_BANDS, store as featureStore } from '../../store/feature-store.js';
@@ -70,7 +71,8 @@ const CANVAS_H = Math.round(window.innerHeight * DPR);
 const ARROW_W = Math.round(90 * DPR); // reserved for voice arrows on right
 const SCROLL_W = CANVAS_W - ARROW_W;  // scrolling area stops before arrows
 const FREQ_ROW_PX = 1;
-// Layout: cochleagram → harmonics → chroma → features → mfcc (+ timbre overlay)
+// Layout: cochleagram → harmonics → notes (MIDI roll) → features → mfcc
+// Overlays: voice arrows (right), Circle of Fifths + timbre space (bottom-left)
 const COCHLEA_H = Math.round(CANVAS_H * 0.48);
 const NUM_FREQ_ROWS = COCHLEA_H; // 1 row per pixel
 const HARM_ROWS = 32;
@@ -78,16 +80,16 @@ const HARM_MAX = 16; // only display first 16 harmonics, spread across 32 rows
 const HARM_H = Math.round(CANVAS_H * 0.17);
 const HARM_ROW_PX = Math.round(HARM_H / HARM_ROWS);
 const HARM_Y = COCHLEA_H;
-const CHROMA_ROWS = 12;
-const CHROMA_H = Math.round(CANVAS_H * 0.07);
-const CHROMA_ROW_PX = Math.round(CHROMA_H / CHROMA_ROWS);
-const CHROMA_Y = HARM_Y + HARM_H;
+const NOTE_ROWS = 12;
+const NOTE_H = Math.round(CANVAS_H * 0.07);
+const NOTE_ROW_PX = Math.round(NOTE_H / NOTE_ROWS);
+const NOTE_Y = HARM_Y + HARM_H;
 const MFCC_ROWS = 13;
 const MFCC_H = Math.round(CANVAS_H * 0.08);
 const MFCC_ROW_PX = Math.round(MFCC_H / MFCC_ROWS);
-const FEAT_H = CANVAS_H - COCHLEA_H - HARM_H - CHROMA_H - MFCC_H;
+const FEAT_H = CANVAS_H - COCHLEA_H - HARM_H - NOTE_H - MFCC_H;
 const FEAT_ROW_PX = Math.round(FEAT_H / 8);
-const FEAT_Y = CHROMA_Y + CHROMA_H;
+const FEAT_Y = NOTE_Y + NOTE_H;
 const MFCC_Y = FEAT_Y + FEAT_H;
 
 const FREQ_LO = 50;
@@ -149,7 +151,7 @@ let featGain = 25;
 
 export function setSensitivity(db) {
   sensitivity = db;
-  featureStore._sensitivity = db;  // share with chroma module
+  featureStore._sensitivity = db;  // share with chroma analysis module
 }
 
 export function setScrollSpeed(px) {
@@ -192,8 +194,8 @@ for (let i = 0; i < 256; i++) {
   cmapLUT[i * 3 + 2] = Math.round(lo[3] + (hi[3] - lo[3]) * f);
 }
 
-// ── Chroma pitch-class colors (one hue per semitone, cycling the color wheel) ──
-const CHROMA_COLORS = [
+// ── Pitch-class colors for MIDI note view (one hue per semitone, cycling the color wheel) ──
+const PITCH_CLASS_COLORS = [
   [255, 60, 60],    // C  - red
   [255, 130, 40],   // C# - orange
   [240, 200, 40],   // D  - yellow
@@ -344,7 +346,7 @@ function buildLabels() {
   const chromaLabel = document.createElement('span');
   chromaLabel.className = 'spec-label feat-label';
   chromaLabel.textContent = 'notes';
-  chromaLabel.style.top = `${((CHROMA_Y + CHROMA_H / 2) / CANVAS_H) * 100}%`;
+  chromaLabel.style.top = `${((NOTE_Y + NOTE_H / 2) / CANVAS_H) * 100}%`;
   container.appendChild(chromaLabel);
 
   // Feature row labels
@@ -908,26 +910,27 @@ export function createSpectrumWall() {
         }
       }
 
-      for (let row = 0; row < CHROMA_ROWS; row++) {
+      for (let row = 0; row < NOTE_ROWS; row++) {
         const energy = Math.max(0, s.chroma[row]);
         const isChordTone = chordNotes[row] === 1;
-        const yTop = CHROMA_Y + Math.round((CHROMA_ROWS - 1 - row) / CHROMA_ROWS * CHROMA_H);
-        const yBot = CHROMA_Y + Math.round((CHROMA_ROWS - row) / CHROMA_ROWS * CHROMA_H);
+        const [cR, cG, cB] = PITCH_CLASS_COLORS[row];
+        const yTop = NOTE_Y + Math.round((NOTE_ROWS - 1 - row) / NOTE_ROWS * NOTE_H);
+        const yBot = NOTE_Y + Math.round((NOTE_ROWS - row) / NOTE_ROWS * NOTE_H);
 
         // Threshold: note is "on" if energy > 0.15
         const noteOn = energy > 0.15 && s.signalPresent;
 
         if (noteOn && isChordTone) {
-          // Chord tone — bright white/cyan, intensity from energy
+          // Chord tone — pitch-class color at full brightness, boosted by energy
           const v = Math.min(1, energy * 1.5);
-          ctx.fillStyle = `rgb(${Math.round(180 * v + 40)},${Math.round(230 * v + 25)},${Math.round(255 * v)})`;
+          ctx.fillStyle = `rgb(${Math.round(cR * v)},${Math.round(cG * v)},${Math.round(cB * v)})`;
         } else if (noteOn) {
-          // Active but not a chord tone — dim grey-blue
-          const v = Math.min(1, energy);
-          ctx.fillStyle = `rgb(${Math.round(40 * v)},${Math.round(50 * v)},${Math.round(80 * v)})`;
+          // Active but not a chord tone — dim version of pitch-class color
+          const v = Math.min(1, energy) * 0.25;
+          ctx.fillStyle = `rgb(${Math.round(cR * v)},${Math.round(cG * v)},${Math.round(cB * v)})`;
         } else {
-          // Inactive — very dark (near black)
-          ctx.fillStyle = `rgb(4,4,8)`;
+          // Inactive — very dark
+          ctx.fillStyle = 'rgb(4,4,8)';
         }
         ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
 
@@ -961,12 +964,12 @@ export function createSpectrumWall() {
       }
       // Chord text overlay on the note strip
       if (displayChord && btFrameCount % 60 === 0) {
-        const fontSize = Math.round(CHROMA_H * 0.38);
+        const fontSize = Math.round(NOTE_H * 0.38);
         ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.fillStyle = 'rgba(255,255,200,0.8)';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
-        ctx.fillText(displayChord, rightX - 4, CHROMA_Y + CHROMA_H / 2);
+        ctx.fillText(displayChord, rightX - 4, NOTE_Y + NOTE_H / 2);
         ctx.textAlign = 'left'; // reset
       }
 
