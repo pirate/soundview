@@ -152,12 +152,19 @@ export function updateFeatures() {
   // ══════════════════════════════════════════════════
   // 3. NOISE FLOOR ESTIMATION
   // ══════════════════════════════════════════════════
-  // Slowly adapt toward current RMS (tracks ambient level)
-  if (store.rms < store.noiseFloor * 1.5) {
-    store.noiseFloor += NOISE_FLOOR_ADAPT * (store.rms - store.noiseFloor);
+  // Track the noise floor as the minimum sustained level. The floor should
+  // only adapt *downward* toward quieter levels (true ambient noise), never
+  // upward toward louder signal. The old logic adapted toward RMS whenever
+  // rms < noiseFloor * 1.5, which caused the floor to converge on constant-
+  // level audio (system loopback, browser playback) making signalPresent
+  // permanently false.
+  if (store.rms < store.noiseFloor) {
+    // Current level is below floor — adapt down quickly (found quieter ambient)
+    store.noiseFloor += NOISE_FLOOR_ADAPT * 2 * (store.rms - store.noiseFloor);
   } else {
-    // Signal is well above noise floor, decay very slowly
-    store.noiseFloor *= (1 - NOISE_FLOOR_ADAPT * 0.1);
+    // Current level is above floor — rise very slowly (accounts for gradual
+    // ambient changes) but never fast enough to track actual signal
+    store.noiseFloor += NOISE_FLOOR_ADAPT * 0.05 * (store.rms - store.noiseFloor);
   }
   store.noiseFloor = Math.max(store.noiseFloor, 1e-5);
 
@@ -444,9 +451,7 @@ export function updateFeatures() {
   updateTimbre();
 
   // Reset key/chord detector state after sustained silence (~2s at 60fps).
-  // Use absolute RMS threshold (not adaptive signalPresent) because the
-  // noise floor tracker can drift up to match constant-level system audio.
-  if (store.rms < 0.001) {
+  if (!store.signalPresent) {
     store._silenceFrames = (store._silenceFrames || 0) + 1;
     if (store._silenceFrames > 120) {
       resetChroma();

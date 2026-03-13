@@ -85,21 +85,15 @@ export function updateChroma() {
     store.chroma[i] += alpha * (rawChroma[i] - store.chroma[i]);
   }
 
-  // Use absolute RMS threshold for chroma gate. The adaptive signalPresent
-  // flag uses noise floor tracking that can drift up to match constant-level
-  // system audio, falsely reporting "no signal" despite obvious energy.
-  // RMS > 0.001 reliably distinguishes real audio from true silence.
-  const hasAudio = store.rms > 0.001;
-
   // Key detection — update every 15 frames (~4× per second) for stability
   keyFrameCounter++;
-  if (keyFrameCounter >= 15 && hasAudio) {
+  if (keyFrameCounter >= 15 && store.signalPresent) {
     keyFrameCounter = 0;
     detectKey();
   }
 
   // Chord detection — every frame for responsiveness
-  if (hasAudio) {
+  if (store.signalPresent) {
     detectChord();
   }
 
