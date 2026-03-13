@@ -61,7 +61,7 @@ export function updateChroma() {
   for (let i = 0; i < 12; i++) {
     const db = rawChroma[i] > 1e-15 ? 10 * Math.log10(rawChroma[i]) : -150;
     // Map dB to 0-1 using same floor/range as cochleagram + sensitivity
-    const norm = (db + store._sensitivity - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
+    const norm = (db - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
     rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
 
