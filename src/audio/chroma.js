@@ -14,13 +14,17 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
-// Chord templates — root-position triads + 7ths
+// Chord templates — root-position triads + 7ths.
+// `penalty` biases toward simpler chords: 7ths share notes with triads
+// (e.g. Em7 contains E,G from C major) so stray harmonic energy can push
+// a 4-note template above a 3-note one. The penalty requires 7ths to win
+// by a clear margin.
 const CHORD_TYPES = [
-  { name: '',    bits: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0] }, // major
-  { name: 'm',   bits: [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0] }, // minor
-  { name: 'dim', bits: [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0] }, // diminished
-  { name: '7',   bits: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0] }, // dominant 7th
-  { name: 'm7',  bits: [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0] }, // minor 7th
+  { name: '',    bits: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0], penalty: 0 },    // major
+  { name: 'm',   bits: [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0], penalty: 0 },    // minor
+  { name: 'dim', bits: [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0], penalty: 0.02 }, // diminished
+  { name: '7',   bits: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], penalty: 0.05 }, // dominant 7th
+  { name: 'm7',  bits: [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0], penalty: 0.05 }, // minor 7th
 ];
 
 let sampleRate = 44100;
@@ -148,7 +152,7 @@ function detectChord() {
       // similarity. Pearson subtracts the mean, so energy in non-chord-tone
       // bins actively hurts the score — cosine ignores it, which causes
       // random jumping with spectrally busy signals like house music.
-      const corr = pearson(store.chroma, chord.bits, root);
+      const corr = pearson(store.chroma, chord.bits, root) - chord.penalty;
       if (corr > bestCorr) {
         bestCorr = corr;
         bestName = NOTE_NAMES[root] + chord.name;
