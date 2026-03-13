@@ -1367,24 +1367,24 @@ export function createSpectrumWall() {
         const cB = Math.round(20 * (1 - pa));
 
         if (beatPulse > 0) {
-          // Glow fades out only (no grow animation — instant on, fade off)
+          // Shrink + fade out: starts at full size, shrinks and fades to nothing
+          const p = beatPulse;
+
+          // Outer glow — shrinks and fades
+          const glowR = circR + Math.round(circR * p * 0.6);
           oCtx.beginPath();
-          oCtx.arc(bx, by, circR + Math.round(6 * DPR), 0, Math.PI * 2);
-          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${beatPulse * 0.3})`;
+          oCtx.arc(bx, by, glowR, 0, Math.PI * 2);
+          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${p * 0.3})`;
           oCtx.fill();
 
-          // Main circle — fixed size, brightness fades down from full
-          oCtx.beginPath();
-          oCtx.arc(bx, by, circR, 0, Math.PI * 2);
-          const fade = beatPulse;
-          oCtx.fillStyle = `rgb(${Math.min(255, cR + Math.round((255 - cR) * fade))},${Math.min(255, cG + Math.round((255 - cG) * fade))},${Math.min(255, cB + Math.round((255 - cB) * fade))})`;
-          oCtx.fill();
-        } else {
-          // Dim idle circle — still shows confidence color
-          oCtx.beginPath();
-          oCtx.arc(bx, by, circR, 0, Math.PI * 2);
-          oCtx.fillStyle = `rgb(${cR >> 1},${cG >> 1},${cB >> 1})`;
-          oCtx.fill();
+          // Main circle — shrinks from full to zero, brightness fades
+          const scaleR = Math.round(circR * p);
+          if (scaleR > 0) {
+            oCtx.beginPath();
+            oCtx.arc(bx, by, scaleR, 0, Math.PI * 2);
+            oCtx.fillStyle = `rgb(${Math.min(255, cR + Math.round((255 - cR) * p))},${Math.min(255, cG + Math.round((255 - cG) * p))},${Math.min(255, cB + Math.round((255 - cB) * p))})`;
+            oCtx.fill();
+          }
         }
       }
 
