@@ -5,23 +5,22 @@ import { store } from '../store/feature-store.js';
 import { NOTE_NAMES } from './chroma.js';
 
 // Krumhansl-Kessler key profiles (from Krumhansl, 1990)
-// These represent the expected distribution of pitch classes in each key.
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
-// Accumulator: long-term weighted chroma distribution
+// Long-term chroma accumulator with very slow decay
 const chromaAccum = new Float64Array(12);
-const DECAY = 0.995;  // slow decay per frame (~3.3s half-life at 60fps)
+// ~10s half-life at 60fps: 0.5 = d^600, d = 0.5^(1/600) ≈ 0.99885
+const DECAY = 0.99885;
 
-let prevKeyName = '';
-let keyStableFrames = 0;
-const MIN_STABLE = 30; // ~500ms before accepting a key change
+// Per-key correlation scores, smoothed over time
+const keyScores = new Float64Array(24); // 0-11 major, 12-23 minor
+const SCORE_SMOOTH = 0.02; // very slow smoothing for score history
 
 /**
  * Correlate a chroma distribution with a key profile rotated to a given root.
  */
 function correlate(chroma, profile, root) {
-  // Compute Pearson correlation between chroma and rotated profile
   let sumX = 0, sumY = 0;
   for (let i = 0; i < 12; i++) {
     sumX += chroma[i];
@@ -49,52 +48,54 @@ function correlate(chroma, profile, root) {
 export function updateKeyDetection() {
   const chroma = store.chromagramSmooth;
 
-  // Accumulate weighted chroma (decay old, add new)
+  // Weight chromagram by signal energy so loud/clear notes matter more
+  const weight = store.signalPresent ? Math.min(1, store.rmsSmooth * 10) : 0;
+
+  // Accumulate weighted chroma (decay old, add energy-weighted new)
   let hasEnergy = false;
   for (let i = 0; i < 12; i++) {
-    chromaAccum[i] = chromaAccum[i] * DECAY + chroma[i];
-    if (chromaAccum[i] > 0.1) hasEnergy = true;
+    chromaAccum[i] = chromaAccum[i] * DECAY + chroma[i] * weight;
+    if (chromaAccum[i] > 0.5) hasEnergy = true;
   }
 
   if (!hasEnergy) {
-    store.keyConfidence = 0;
+    store.keyConfidence *= 0.99; // slow fade rather than instant drop
     return;
   }
 
-  // Test all 24 keys (12 major + 12 minor)
-  let bestCorr = -2;
-  let bestRoot = 0;
-  let bestMode = 'maj';
-
+  // Test all 24 keys and smooth the scores over time
   for (let root = 0; root < 12; root++) {
     const majCorr = correlate(chromaAccum, MAJOR_PROFILE, root);
-    if (majCorr > bestCorr) {
-      bestCorr = majCorr;
-      bestRoot = root;
-      bestMode = 'maj';
-    }
     const minCorr = correlate(chromaAccum, MINOR_PROFILE, root);
-    if (minCorr > bestCorr) {
-      bestCorr = minCorr;
-      bestRoot = root;
-      bestMode = 'min';
+    keyScores[root] += SCORE_SMOOTH * (majCorr - keyScores[root]);
+    keyScores[12 + root] += SCORE_SMOOTH * (minCorr - keyScores[12 + root]);
+  }
+
+  // Find best smoothed score
+  let bestScore = -2;
+  let bestIdx = 0;
+  for (let i = 0; i < 24; i++) {
+    if (keyScores[i] > bestScore) {
+      bestScore = keyScores[i];
+      bestIdx = i;
     }
   }
 
-  // Confidence from correlation strength (typically 0.3-0.9)
-  const confidence = Math.max(0, Math.min(1, (bestCorr - 0.2) / 0.6));
-
+  const bestRoot = bestIdx % 12;
+  const bestMode = bestIdx < 12 ? 'maj' : 'min';
+  const confidence = Math.max(0, Math.min(1, (bestScore - 0.2) / 0.5));
   const candidateName = NOTE_NAMES[bestRoot] + (bestMode === 'min' ? 'm' : '');
 
-  // Stability filter: require consistent detection before updating displayed key
-  if (candidateName === prevKeyName) {
-    keyStableFrames++;
-  } else {
-    keyStableFrames = 0;
-    prevKeyName = candidateName;
+  // Hysteresis: require the new key to beat the current key's score
+  // by a significant margin before switching
+  if (store.keyName && candidateName !== store.keyName) {
+    const curIdx = store.keyRoot + (store.keyMode === 'min' ? 12 : 0);
+    const margin = keyScores[bestIdx] - keyScores[curIdx];
+    // Need >0.05 correlation advantage to switch keys
+    if (margin < 0.05) return;
   }
 
-  if (keyStableFrames >= MIN_STABLE && confidence > 0.2) {
+  if (confidence > 0.15) {
     store.keyRoot = bestRoot;
     store.keyMode = bestMode;
     store.keyName = candidateName;
