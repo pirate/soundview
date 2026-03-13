@@ -343,7 +343,7 @@ function buildLabels() {
   // Chroma strip label
   const chromaLabel = document.createElement('span');
   chromaLabel.className = 'spec-label feat-label';
-  chromaLabel.textContent = 'chroma';
+  chromaLabel.textContent = 'notes';
   chromaLabel.style.top = `${((CHROMA_Y + CHROMA_H / 2) / CANVAS_H) * 100}%`;
   container.appendChild(chromaLabel);
 
@@ -866,27 +866,81 @@ export function createSpectrumWall() {
         prevDomY = -1;
       }
 
-      // ── Chroma strip (12 rows — one per pitch class, C at bottom, B at top) ──
-      for (let row = 0; row < CHROMA_ROWS; row++) {
-        const energy = s.chroma[row]; // 0-1 normalized
-        const [cR, cG, cB] = CHROMA_COLORS[row];
-        // Gamma-compress energy for visibility of quiet notes
-        const v = Math.max(0, energy); // log compression already done in analysis
-        const r = Math.round(cR * v);
-        const g = Math.round(cG * v);
-        const b = Math.round(cB * v);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        // row 0 (C) at bottom, row 11 (B) at top
-        const yTop = CHROMA_Y + Math.round((CHROMA_ROWS - 1 - row) / CHROMA_ROWS * CHROMA_H);
-        const yBot = CHROMA_Y + Math.round((CHROMA_ROWS - row) / CHROMA_ROWS * CHROMA_H);
-        ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
+      // ── MIDI note view (12 rows — scrolling piano roll of detected chord notes) ──
+      // Parse chord to get active pitch classes
+      const chordNotes = new Uint8Array(12); // 1 = chord tone, 0 = not
+      if (s.signalPresent && s.detectedChordConfidence > 0.4 && displayChord) {
+        // Find root note index
+        let rootIdx = -1;
+        let chordSuffix = '';
+        // Try two-char root first (e.g. C#, Db)
+        for (let ni = 0; ni < 12; ni++) {
+          if (displayChord.startsWith(NOTE_LABELS[ni])) {
+            if (NOTE_LABELS[ni].length > 1 || rootIdx < 0) {
+              rootIdx = ni;
+              chordSuffix = displayChord.slice(NOTE_LABELS[ni].length);
+            }
+          }
+        }
+        if (rootIdx >= 0) {
+          // Apply chord template intervals
+          if (chordSuffix === 'm' || chordSuffix === 'm7') {
+            // minor: root, m3, P5
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 3) % 12] = 1;
+            chordNotes[(rootIdx + 7) % 12] = 1;
+            if (chordSuffix === 'm7') chordNotes[(rootIdx + 10) % 12] = 1;
+          } else if (chordSuffix === 'dim') {
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 3) % 12] = 1;
+            chordNotes[(rootIdx + 6) % 12] = 1;
+          } else if (chordSuffix === '7') {
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 4) % 12] = 1;
+            chordNotes[(rootIdx + 7) % 12] = 1;
+            chordNotes[(rootIdx + 10) % 12] = 1;
+          } else {
+            // major: root, M3, P5
+            chordNotes[(rootIdx) % 12] = 1;
+            chordNotes[(rootIdx + 4) % 12] = 1;
+            chordNotes[(rootIdx + 7) % 12] = 1;
+          }
+        }
       }
 
-      // Key + chord text overlay (on right edge, over chroma strip)
+      for (let row = 0; row < CHROMA_ROWS; row++) {
+        const energy = Math.max(0, s.chroma[row]);
+        const isChordTone = chordNotes[row] === 1;
+        const yTop = CHROMA_Y + Math.round((CHROMA_ROWS - 1 - row) / CHROMA_ROWS * CHROMA_H);
+        const yBot = CHROMA_Y + Math.round((CHROMA_ROWS - row) / CHROMA_ROWS * CHROMA_H);
+
+        // Threshold: note is "on" if energy > 0.15
+        const noteOn = energy > 0.15 && s.signalPresent;
+
+        if (noteOn && isChordTone) {
+          // Chord tone — bright white/cyan, intensity from energy
+          const v = Math.min(1, energy * 1.5);
+          ctx.fillStyle = `rgb(${Math.round(180 * v + 40)},${Math.round(230 * v + 25)},${Math.round(255 * v)})`;
+        } else if (noteOn) {
+          // Active but not a chord tone — dim grey-blue
+          const v = Math.min(1, energy);
+          ctx.fillStyle = `rgb(${Math.round(40 * v)},${Math.round(50 * v)},${Math.round(80 * v)})`;
+        } else {
+          // Inactive — very dark (near black)
+          ctx.fillStyle = `rgb(4,4,8)`;
+        }
+        ctx.fillRect(rightX, yTop, scrollSpeed, yBot - yTop);
+
+        // Thin separator line between rows
+        ctx.fillStyle = 'rgba(30,30,40,1)';
+        ctx.fillRect(rightX, yBot - 1, scrollSpeed, 1);
+      }
+
+      // Key + chord hold smoothing (for Circle of Fifths overlay)
       if (s.signalPresent && s.detectedKeyConfidence > 0.3) {
         if (s.detectedKey !== displayKey) {
           keyHoldFrames++;
-          if (keyHoldFrames > 30) { // hold 0.5s before updating
+          if (keyHoldFrames > 30) {
             displayKey = s.detectedKey;
             keyHoldFrames = 0;
           }
@@ -897,23 +951,12 @@ export function createSpectrumWall() {
       if (s.signalPresent && s.detectedChordConfidence > 0.5) {
         if (s.detectedChord !== displayChord) {
           chordHoldFrames++;
-          if (chordHoldFrames > 10) { // faster chord updates
+          if (chordHoldFrames > 10) {
             displayChord = s.detectedChord;
             chordHoldFrames = 0;
           }
         } else {
           chordHoldFrames = 0;
-        }
-      }
-      // Draw key/chord text every ~60 frames to avoid visual noise
-      if (displayKey && btFrameCount % 60 === 0) {
-        const fontSize = Math.round(CHROMA_H * 0.35);
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.fillText(displayKey, rightX - fontSize * 4.5, CHROMA_Y + fontSize + 2);
-        if (displayChord) {
-          ctx.fillStyle = 'rgba(255,255,200,0.75)';
-          ctx.fillText(displayChord, rightX - fontSize * 4.5, CHROMA_Y + fontSize * 2 + 4);
         }
       }
 
@@ -1232,6 +1275,133 @@ export function createSpectrumWall() {
           oCtx.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
           oCtx.fillText(freqText, CANVAS_W - 4, cy);
         }
+      }
+
+      // ── Circle of Fifths key overlay (bottom-left, above timbre map) ──
+      {
+        const pad = Math.round(8 * DPR);
+        const cofSize = Math.round(Math.min(CANVAS_H * 0.12, CANVAS_W * 0.12));
+        const cofX = pad;
+        const cofY = CANVAS_H - TIMBRE_SZ - cofSize - pad * 3;
+        const cofCx = cofX + cofSize / 2;
+        const cofCy = cofY + cofSize / 2;
+        const outerR = cofSize / 2;
+
+        // Circle of fifths order (starting from top = C)
+        const COF_MAJOR = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'G#', 'D#', 'A#', 'F'];
+        const COF_MINOR = ['Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m', 'Fm', 'Cm', 'Gm', 'Dm'];
+
+        // Parse detected key into CoF index
+        let detKeyIdx = -1;
+        let detKeyIsMajor = true;
+        if (displayKey) {
+          // displayKey is like "C maj", "A min"
+          const parts = displayKey.split(' ');
+          const root = parts[0];
+          const mode = parts[1];
+          if (mode === 'maj') {
+            detKeyIdx = COF_MAJOR.indexOf(root);
+            detKeyIsMajor = true;
+          } else if (mode === 'min') {
+            detKeyIdx = COF_MINOR.indexOf(root + 'm');
+            detKeyIsMajor = false;
+          }
+        }
+
+        // Semi-transparent background circle
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, outerR, 0, Math.PI * 2);
+        oCtx.fillStyle = 'rgba(0,0,0,0.65)';
+        oCtx.fill();
+
+        // Radius ratios for concentric rings
+        const majorR = outerR * 0.85;
+        const minorR = outerR * 0.52;
+        const innerR = outerR * 0.35;
+
+        // Dividing circle between major and minor rings
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, outerR * 0.68, 0, Math.PI * 2);
+        oCtx.strokeStyle = 'rgba(60,60,60,0.5)';
+        oCtx.lineWidth = 1;
+        oCtx.stroke();
+
+        // Inner circle
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, innerR, 0, Math.PI * 2);
+        oCtx.strokeStyle = 'rgba(60,60,60,0.4)';
+        oCtx.stroke();
+
+        // Segment dividers (12 segments, 30° each)
+        for (let i = 0; i < 12; i++) {
+          const angle = (i * 30 - 90 - 15) * Math.PI / 180;
+          oCtx.beginPath();
+          oCtx.moveTo(cofCx + innerR * Math.cos(angle), cofCy + innerR * Math.sin(angle));
+          oCtx.lineTo(cofCx + outerR * Math.cos(angle), cofCy + outerR * Math.sin(angle));
+          oCtx.strokeStyle = 'rgba(50,50,50,0.4)';
+          oCtx.lineWidth = 1;
+          oCtx.stroke();
+        }
+
+        // Highlight detected key segment
+        if (detKeyIdx >= 0 && s.signalPresent) {
+          const startAngle = (detKeyIdx * 30 - 90 - 15) * Math.PI / 180;
+          const endAngle = (detKeyIdx * 30 - 90 + 15) * Math.PI / 180;
+          const hlR = detKeyIsMajor ? outerR : outerR * 0.68;
+          const hlInner = detKeyIsMajor ? outerR * 0.68 : innerR;
+
+          oCtx.beginPath();
+          oCtx.arc(cofCx, cofCy, hlR, startAngle, endAngle);
+          oCtx.arc(cofCx, cofCy, hlInner, endAngle, startAngle, true);
+          oCtx.closePath();
+          oCtx.fillStyle = 'rgba(80,180,255,0.45)';
+          oCtx.fill();
+        }
+
+        // Key labels
+        const majFontSz = Math.max(6, Math.round(cofSize * 0.08));
+        const minFontSz = Math.max(5, Math.round(cofSize * 0.065));
+
+        for (let i = 0; i < 12; i++) {
+          const angle = (i * 30 - 90) * Math.PI / 180;
+
+          // Major key label (outer ring)
+          const mx = cofCx + majorR * Math.cos(angle);
+          const my = cofCy + majorR * Math.sin(angle);
+          oCtx.font = `${detKeyIdx === i && detKeyIsMajor ? 'bold ' : ''}${majFontSz}px sans-serif`;
+          oCtx.textAlign = 'center';
+          oCtx.textBaseline = 'middle';
+          oCtx.fillStyle = detKeyIdx === i && detKeyIsMajor
+            ? 'rgba(140,220,255,0.95)'
+            : 'rgba(180,180,180,0.6)';
+          oCtx.fillText(COF_MAJOR[i], mx, my);
+
+          // Minor key label (inner ring)
+          const nx = cofCx + minorR * Math.cos(angle);
+          const ny = cofCy + minorR * Math.sin(angle);
+          oCtx.font = `${detKeyIdx === i && !detKeyIsMajor ? 'bold ' : ''}${minFontSz}px sans-serif`;
+          oCtx.fillStyle = detKeyIdx === i && !detKeyIsMajor
+            ? 'rgba(140,220,255,0.95)'
+            : 'rgba(140,140,140,0.5)';
+          oCtx.fillText(COF_MINOR[i], nx, ny);
+        }
+
+        // Center: show detected chord
+        if (displayChord && s.signalPresent) {
+          const chordFontSz = Math.max(7, Math.round(cofSize * 0.12));
+          oCtx.font = `bold ${chordFontSz}px sans-serif`;
+          oCtx.textAlign = 'center';
+          oCtx.textBaseline = 'middle';
+          oCtx.fillStyle = 'rgba(255,255,200,0.9)';
+          oCtx.fillText(displayChord, cofCx, cofCy);
+        }
+
+        // Outer ring border
+        oCtx.beginPath();
+        oCtx.arc(cofCx, cofCy, outerR, 0, Math.PI * 2);
+        oCtx.strokeStyle = 'rgba(100,100,100,0.5)';
+        oCtx.lineWidth = 1;
+        oCtx.stroke();
       }
 
       // ── Timbre space overlay (bottom-left corner on overlay canvas) ──
