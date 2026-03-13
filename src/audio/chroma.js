@@ -70,9 +70,11 @@ export function updateChroma() {
     rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
 
-  // Smooth into store
+  // Smooth into store — asymmetric attack/release keeps onsets responsive
+  // while letting chroma bins decay slowly for stable chord/key detection
   for (let i = 0; i < 12; i++) {
-    store.chroma[i] += 0.35 * (rawChroma[i] - store.chroma[i]);
+    const alpha = rawChroma[i] > store.chroma[i] ? 0.3 : 0.08;
+    store.chroma[i] += alpha * (rawChroma[i] - store.chroma[i]);
   }
 
   // Key detection — update every 15 frames (~4× per second) for stability
@@ -113,7 +115,6 @@ function detectKey() {
 
 function detectChord() {
   // Require at least 3 active pitch classes — a chord needs multiple notes.
-  // Without this, single tones match chord templates with high cosine similarity.
   const ACTIVE_THRESHOLD = 0.1;
   let activeCount = 0;
   for (let i = 0; i < 12; i++) {
@@ -129,20 +130,23 @@ function detectChord() {
 
   for (const chord of CHORD_TYPES) {
     for (let root = 0; root < 12; root++) {
-      let dot = 0, magA = 0, magB = 0;
-      for (let i = 0; i < 12; i++) {
-        const a = store.chroma[(i + root) % 12];
-        const b = chord.bits[i];
-        dot += a * b;
-        magA += a * a;
-        magB += b * b;
-      }
-      const corr = dot / (Math.sqrt(magA * magB) + 1e-10);
+      // Use Pearson correlation (same as key detection) instead of cosine
+      // similarity. Pearson subtracts the mean, so energy in non-chord-tone
+      // bins actively hurts the score — cosine ignores it, which causes
+      // random jumping with spectrally busy signals like house music.
+      const corr = pearson(store.chroma, chord.bits, root);
       if (corr > bestCorr) {
         bestCorr = corr;
         bestName = NOTE_NAMES[root] + chord.name;
       }
     }
+  }
+
+  // Require meaningful correlation — below this the match is noise
+  if (bestCorr < 0.25) {
+    store.detectedChord = '';
+    store.detectedChordConfidence = 0;
+    return;
   }
 
   store.detectedChord = bestName;
