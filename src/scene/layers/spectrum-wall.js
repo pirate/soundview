@@ -452,9 +452,8 @@ export function createSpectrumWall() {
     return Math.exp(-0.5 * (dist * dist) / (sigma * sigma));
   }
 
+  const btACorrBuf = new Float32Array(BT_MAX_LAG + 2); // store weighted autocorrelation
   function btEstimateTempo() {
-    // Compute autocorrelation energy at lag 0 for normalization
-    let bestLag = 0, bestCorr = -1;
     for (let lag = BT_MIN_LAG; lag <= BT_MAX_LAG; lag++) {
       let corr = 0;
       const n = BT_BUF_LEN - lag;
@@ -463,10 +462,26 @@ export function createSpectrumWall() {
         const b = (a - lag + BT_BUF_LEN) % BT_BUF_LEN;
         corr += btOdf[a] * btOdf[b];
       }
-      // Rayleigh weighting centered ~120 BPM (lag 30)
-      const r = lag / 30;
-      corr *= r * Math.exp(-0.5 * r * r);
-      if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+      // Very mild weighting: suppress extremes of the lag range
+      const t = (lag - BT_MIN_LAG) / (BT_MAX_LAG - BT_MIN_LAG);
+      corr *= 0.5 + 0.5 * Math.sin(t * Math.PI);
+      btACorrBuf[lag] = corr;
+    }
+    // Find integer peak
+    let bestLag = BT_MIN_LAG;
+    for (let lag = BT_MIN_LAG + 1; lag <= BT_MAX_LAG; lag++) {
+      if (btACorrBuf[lag] > btACorrBuf[bestLag]) bestLag = lag;
+    }
+    // Parabolic interpolation for sub-frame precision
+    if (bestLag > BT_MIN_LAG && bestLag < BT_MAX_LAG) {
+      const prev = btACorrBuf[bestLag - 1];
+      const curr = btACorrBuf[bestLag];
+      const next = btACorrBuf[bestLag + 1];
+      const denom = prev - 2 * curr + next;
+      if (denom < -1e-12) {
+        const shift = 0.5 * (prev - next) / denom;
+        return bestLag + Math.max(-0.5, Math.min(0.5, shift));
+      }
     }
     return bestLag;
   }
@@ -1200,9 +1215,9 @@ export function createSpectrumWall() {
       // Track ODF energy for gating (smooth average of spectral flux variance)
       btOdfEnergy = btOdfEnergy * 0.99 + odfVal * odfVal * 0.01;
 
-      // Re-estimate tempo every ~1 second (always runs)
+      // Re-estimate tempo every ~0.5 seconds (always runs)
       btTempoCounter++;
-      if (btTempoCounter >= 60) {
+      if (btTempoCounter >= 30) {
         btTempoCounter = 0;
         const newPeriod = btEstimateTempo();
         if (newPeriod >= BT_MIN_LAG && newPeriod <= BT_MAX_LAG) {
@@ -1210,7 +1225,10 @@ export function createSpectrumWall() {
             btPeriod = newPeriod;
             btCounter = newPeriod;
           } else {
-            btPeriod += 0.12 * (newPeriod - btPeriod);
+            // Adaptive smoothing: fast when far off, slow when locked
+            const err = Math.abs(newPeriod - btPeriod) / btPeriod;
+            const alpha = err > 0.15 ? 0.5 : err > 0.05 ? 0.3 : 0.15;
+            btPeriod += alpha * (newPeriod - btPeriod);
           }
         }
       }
