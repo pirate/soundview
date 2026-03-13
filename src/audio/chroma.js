@@ -112,6 +112,19 @@ function detectKey() {
 }
 
 function detectChord() {
+  // Require at least 3 active pitch classes — a chord needs multiple notes.
+  // Without this, single tones match chord templates with high cosine similarity.
+  const ACTIVE_THRESHOLD = 0.1;
+  let activeCount = 0;
+  for (let i = 0; i < 12; i++) {
+    if (store.chroma[i] > ACTIVE_THRESHOLD) activeCount++;
+  }
+  if (activeCount < 3) {
+    store.detectedChord = '';
+    store.detectedChordConfidence = 0;
+    return;
+  }
+
   let bestCorr = -Infinity, bestName = '';
 
   for (const chord of CHORD_TYPES) {
