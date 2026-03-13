@@ -1,0 +1,23 @@
+src/scene/layers/spectrum-wall.js
+  8c859f06cf152c5f 427,1202-1204,1263,1266-1270,1356,1358-1359,1362,1364-1367,1369-1370,1372-1376,1378-1380,1382-1383,1385-1386
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.11",
+  "base_commit_sha": "b7fa3a937a2053aede5feeb55397f7aa452ad5f5",
+  "prompts": {
+    "8c859f06cf152c5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91f60580-2d87-4fda-a7e9-04991e905346",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>",
+      "messages": [],
+      "total_additions": 51,
+      "total_deletions": 48,
+      "accepted_lines": 33,
+      "overriden_lines": 0
+    }
+  }
+}
