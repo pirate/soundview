@@ -339,6 +339,9 @@ export function updateFeatures() {
       ? Math.min(harmonicPower / totalSpecPower, 1)
       : 0;
 
+    // Save raw amplitudes before normalization (for timbre analysis)
+    store.harmonicAmplitudesRaw.set(store.harmonicAmplitudes);
+
     // Normalize harmonic amplitudes relative to fundamental
     const fundAmp = store.harmonicAmplitudes[0];
     if (fundAmp > 1e-15) {
@@ -439,6 +442,14 @@ export function updateFeatures() {
   // 12. TIMBRE DESCRIPTORS (MFCCs, tristimulus, inharmonicity)
   // ══════════════════════════════════════════════════
   updateTimbre();
+
+  // Clear key/chord state when no signal present
+  if (!store.signalPresent) {
+    store.detectedKey = '';
+    store.detectedKeyConfidence = 0;
+    store.detectedChord = '';
+    store.detectedChordConfidence = 0;
+  }
 
   // ══════════════════════════════════════════════════
   // 13. ADVANCE HISTORY INDEX

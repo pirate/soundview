@@ -1,7 +1,7 @@
 // Fullscreen scrolling cochleagram + harmonic profile + feature strip + voice circles.
 // Pure 2D canvas rendering — no WebGL/Three.js.
 
-import { SPECTRUM_BINS, NUM_BANDS } from '../../store/feature-store.js';
+import { SPECTRUM_BINS, NUM_BANDS, store as featureStore } from '../../store/feature-store.js';
 
 // ── Multi-voice pitch detection (subharmonic summation) ──
 const MAX_VOICES = 4;
@@ -149,6 +149,7 @@ let featGain = 25;
 
 export function setSensitivity(db) {
   sensitivity = db;
+  featureStore._sensitivity = db;  // share with chroma module
 }
 
 export function setScrollSpeed(px) {
@@ -429,6 +430,9 @@ export function createSpectrumWall() {
   // ── Timbre space trail ──
   const timbreTrailX = new Float32Array(TRAIL_LEN);
   const timbreTrailY = new Float32Array(TRAIL_LEN);
+  const timbreTrailR = new Uint8Array(TRAIL_LEN);
+  const timbreTrailG = new Uint8Array(TRAIL_LEN);
+  const timbreTrailB = new Uint8Array(TRAIL_LEN);
   let trailIdx = 0;
   let trailCount = 0;
 
@@ -867,7 +871,7 @@ export function createSpectrumWall() {
         const energy = s.chroma[row]; // 0-1 normalized
         const [cR, cG, cB] = CHROMA_COLORS[row];
         // Gamma-compress energy for visibility of quiet notes
-        const v = Math.pow(Math.max(0, energy), 0.5);
+        const v = Math.max(0, energy); // log compression already done in analysis
         const r = Math.round(cR * v);
         const g = Math.round(cG * v);
         const b = Math.round(cB * v);
@@ -1276,6 +1280,9 @@ export function createSpectrumWall() {
         if (s.signalPresent && s.rmsSmooth > 0.003) {
           timbreTrailX[trailIdx] = dotX;
           timbreTrailY[trailIdx] = dotY;
+          timbreTrailR[trailIdx] = Math.round(s.tristimulus[0] * 255);
+          timbreTrailG[trailIdx] = Math.round(s.tristimulus[1] * 255);
+          timbreTrailB[trailIdx] = Math.round(s.tristimulus[2] * 255);
           trailIdx = (trailIdx + 1) % TRAIL_LEN;
           if (trailCount < TRAIL_LEN) trailCount++;
         }
@@ -1287,11 +1294,8 @@ export function createSpectrumWall() {
           const alpha = (1 - age) * 0.4;
           if (alpha < 0.02) continue;
 
-          // Color from tristimulus
-          const tR = Math.round(s.tristimulus[0] * 255);
-          const tG = Math.round(s.tristimulus[1] * 255);
-          const tB = Math.round(s.tristimulus[2] * 255);
-          oCtx.fillStyle = `rgba(${tR},${tG},${tB},${alpha})`;
+          // Color from stored tristimulus at time of recording
+          oCtx.fillStyle = `rgba(${timbreTrailR[idx]},${timbreTrailG[idx]},${timbreTrailB[idx]},${alpha})`;
 
           const sz = Math.max(2, Math.round(3 * DPR * (1 - age * 0.5)));
           oCtx.fillRect(timbreTrailX[idx] - sz / 2, timbreTrailY[idx] - sz / 2, sz, sz);

@@ -4,6 +4,10 @@
 
 import { SPECTRUM_BINS, store } from '../store/feature-store.js';
 
+// dB range for chroma log-scaling (matches cochleagram approach)
+const CHROMA_DB_FLOOR = -80;   // absolute bottom — chroma sums many bins so floor is higher
+const CHROMA_DB_RANGE = 60;    // usable dynamic range (dB)
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 // Krumhansl-Kessler key profiles (starting from the tonic)
@@ -50,11 +54,15 @@ export function updateChroma() {
     rawChroma[pc] += power;
   }
 
-  // Normalize to 0-1
-  let maxVal = 0;
-  for (let i = 0; i < 12; i++) if (rawChroma[i] > maxVal) maxVal = rawChroma[i];
-  if (maxVal > 1e-10) {
-    for (let i = 0; i < 12; i++) rawChroma[i] /= maxVal;
+  // Log-scale then linearly rescale to 0-1 (no auto-ranging).
+  // Convert summed power to dB, apply the same sensitivity offset and
+  // dB-range mapping that the cochleagram uses so the user's sensitivity
+  // slider controls chroma brightness too.
+  for (let i = 0; i < 12; i++) {
+    const db = rawChroma[i] > 1e-15 ? 10 * Math.log10(rawChroma[i]) : -150;
+    // Map dB to 0-1 using same floor/range as cochleagram + sensitivity
+    const norm = (db + store._sensitivity - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
+    rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
 
   // Smooth into store

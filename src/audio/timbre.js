@@ -96,22 +96,27 @@ export function updateTimbre() {
   // 2. TRISTIMULUS
   // ══════════════════════════════════════════════════
   // T1 = H1/total, T2 = (H2+H3+H4)/total, T3 = (H5+...+Hn)/total
+  // Use raw (un-normalized) harmonic amplitudes for tristimulus and inharmonicity
+  // so that absolute magnitudes are preserved for proper weighting
+  const rawAmps = store.harmonicAmplitudesRaw;
+
   if (store.pitch > 0 && store.pitchConfidence > 0.3) {
     let total = 0;
-    for (let h = 0; h < 32; h++) total += store.harmonicAmplitudes[h];
+    for (let h = 0; h < 32; h++) total += rawAmps[h];
 
     if (total > 1e-6) {
-      store.tristimulus[0] = store.harmonicAmplitudes[0] / total;
-      store.tristimulus[1] = (
-        store.harmonicAmplitudes[1] +
-        store.harmonicAmplitudes[2] +
-        store.harmonicAmplitudes[3]
-      ) / total;
+      store.tristimulus[0] = rawAmps[0] / total;
+      store.tristimulus[1] = (rawAmps[1] + rawAmps[2] + rawAmps[3]) / total;
 
       let rest = 0;
-      for (let h = 4; h < 32; h++) rest += store.harmonicAmplitudes[h];
+      for (let h = 4; h < 32; h++) rest += rawAmps[h];
       store.tristimulus[2] = rest / total;
     }
+  } else {
+    // Decay tristimulus toward zero when no pitch detected
+    store.tristimulus[0] *= 0.95;
+    store.tristimulus[1] *= 0.95;
+    store.tristimulus[2] *= 0.95;
   }
 
   // ══════════════════════════════════════════════════
@@ -140,7 +145,7 @@ export function updateTimbre() {
       }
 
       const dev = Math.abs(bestBin * binHz - expected) / expected;
-      const w = store.harmonicAmplitudes[h];
+      const w = rawAmps[h];
       totalDev += dev * w;
       totalW += w;
     }
