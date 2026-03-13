@@ -62,12 +62,9 @@ export function updateChroma() {
   }
 
   // Log-scale then linearly rescale to 0-1 (no auto-ranging).
-  // Convert summed power to dB, apply the same sensitivity offset and
-  // dB-range mapping that the cochleagram uses so the user's sensitivity
-  // slider controls chroma brightness too.
+  // Convert summed power to dB, then map to 0-1 using fixed floor/range.
   for (let i = 0; i < 12; i++) {
     const db = rawChroma[i] > 1e-15 ? 10 * Math.log10(rawChroma[i]) : -150;
-    // Map dB to 0-1 using same floor/range as cochleagram + sensitivity
     const norm = (db - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
     rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
