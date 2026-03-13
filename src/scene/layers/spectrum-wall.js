@@ -828,16 +828,18 @@ export function createSpectrumWall() {
         if (chordStableFrames >= 10 && framesSinceChordDraw > minFramesBetween) {
           const chordFontSize = Math.round(CANVAS_H * 0.035);
           ctx.font = `bold ${chordFontSize}px sans-serif`;
-          ctx.textAlign = 'center';
+          ctx.textAlign = 'right';
           ctx.textBaseline = 'middle';
           const cy = HARM_Y + HARM_H * 0.5;
-          // Black outline for readability over colored background
+          // Right-align at rightX so text sits entirely in the
+          // already-scrolled area — prevents subsequent harmonic
+          // strip columns from overwriting it as it scrolls left.
+          const tx = rightX - 2;
           ctx.lineWidth = 4;
           ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-          ctx.strokeText(s.chordName, rightX, cy);
-          // White fill
+          ctx.strokeText(s.chordName, tx, cy);
           ctx.fillStyle = 'rgba(255,255,255,0.95)';
-          ctx.fillText(s.chordName, rightX, cy);
+          ctx.fillText(s.chordName, tx, cy);
           framesSinceChordDraw = 0;
         }
       } else {
