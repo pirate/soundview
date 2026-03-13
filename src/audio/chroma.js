@@ -144,23 +144,22 @@ function detectChord() {
     return;
   }
 
-  let bestCorr = -Infinity, bestName = '';
+  let bestScore = -Infinity, bestCorr = -Infinity, bestName = '';
 
   for (const chord of CHORD_TYPES) {
     for (let root = 0; root < 12; root++) {
-      // Use Pearson correlation (same as key detection) instead of cosine
-      // similarity. Pearson subtracts the mean, so energy in non-chord-tone
-      // bins actively hurts the score — cosine ignores it, which causes
-      // random jumping with spectrally busy signals like house music.
-      const corr = pearson(store.chroma, chord.bits, root) - chord.penalty;
-      if (corr > bestCorr) {
-        bestCorr = corr;
+      const corr = pearson(store.chroma, chord.bits, root);
+      // Penalized score for ranking only — prefer simpler chords when close
+      const score = corr - chord.penalty;
+      if (score > bestScore) {
+        bestScore = score;
+        bestCorr = corr; // keep raw correlation for confidence threshold
         bestName = NOTE_NAMES[root] + chord.name;
       }
     }
   }
 
-  // Require meaningful correlation — below this the match is noise
+  // Require meaningful raw correlation — below this the match is noise
   if (bestCorr < 0.25) {
     store.detectedChord = '';
     store.detectedChordConfidence = 0;
