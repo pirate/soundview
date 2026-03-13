@@ -74,15 +74,9 @@ export function updateChroma() {
     rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
 
-  // Chroma-level whitening: subtract the median pitch-class energy.
-  // Broadband noise (drums, hiss) adds roughly equal energy to all 12 bins —
-  // subtracting the median removes this floor while preserving the peaks
-  // from tonal content. This is robust regardless of audio source or FFT shape.
-  const sorted = Array.from(rawChroma).sort((a, b) => a - b);
-  const chromaMedian = (sorted[5] + sorted[6]) / 2;
-  for (let i = 0; i < 12; i++) {
-    rawChroma[i] = Math.max(0, rawChroma[i] - chromaMedian);
-  }
+  // No chroma-level whitening needed — Pearson correlation (used by both
+  // detectKey and detectChord) inherently subtracts the mean, so uniform
+  // broadband energy from drums is already cancelled mathematically.
 
   // Smooth into store — asymmetric attack/release keeps onsets responsive
   // while letting chroma bins decay slowly for stable chord/key detection
