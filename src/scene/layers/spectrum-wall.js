@@ -959,6 +959,16 @@ export function createSpectrumWall() {
           chordHoldFrames = 0;
         }
       }
+      // Chord text overlay on the note strip
+      if (displayChord && btFrameCount % 60 === 0) {
+        const fontSize = Math.round(CHROMA_H * 0.38);
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,200,0.8)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(displayChord, rightX - 4, CHROMA_Y + CHROMA_H / 2);
+        ctx.textAlign = 'left'; // reset
+      }
 
       // ── Feature strip (8 rows) ──
       // No signalPresent gating — each feature stands on its own values.
