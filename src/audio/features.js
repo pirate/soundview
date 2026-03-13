@@ -6,7 +6,7 @@ import { bands } from './filterbank.js';
 import { detectPitch } from './pitch.js';
 import { updateModulation } from './modulation.js';
 import { initFormants, detectFormants } from './formants.js';
-import { initChroma, updateChroma } from './chroma.js';
+import { initChroma, updateChroma, resetChroma } from './chroma.js';
 import { initTimbre, updateTimbre } from './timbre.js';
 
 // ── Smoothing constants ──
@@ -443,8 +443,10 @@ export function updateFeatures() {
   // ══════════════════════════════════════════════════
   updateTimbre();
 
-  // Clear key/chord state when no signal present
+  // Reset key/chord detector state during silence so stale detections
+  // don't bleed through when signal returns
   if (!store.signalPresent) {
+    resetChroma();
     store.detectedKey = '';
     store.detectedKeyConfidence = 0;
     store.detectedChord = '';

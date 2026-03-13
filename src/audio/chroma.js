@@ -33,6 +33,13 @@ export function initChroma(sr, fft) {
   fftSize = fft;
 }
 
+// Reset accumulated key/chord state so stale detections don't bleed across silence gaps
+export function resetChroma() {
+  keyAccum.fill(0);
+  keyFrameCounter = 0;
+  store.chroma.fill(0);
+}
+
 export function updateChroma() {
   const binHz = sampleRate / fftSize;
   const numBins = Math.min(SPECTRUM_BINS, fftSize / 2);
