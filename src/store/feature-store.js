@@ -98,4 +98,14 @@ export const store = {
   mfcc: new Float32Array(13),          // 13 mel-frequency cepstral coefficients
   tristimulus: new Float32Array(3),    // T1 (fundamental), T2 (H2-H4), T3 (H5+)
   inharmonicity: 0,                    // deviation of partials from harmonic series
+
+  // ── Speech recognition (Whisper) ──
+  speechText: '',                      // most recent recognized word/phrase
+  speechWords: [],                     // array of { word, start, end, timestamp }
+  speechLoading: true,                 // true while model is loading
+
+  // ── Note transcription (Basic Pitch) ──
+  activeNotes: [],                     // array of { pitchMidi, startTime, amplitude }
+  noteEvents: [],                      // recent note-on/off events for score strip
+  transcriptionLoading: true,          // true while model is loading
 };

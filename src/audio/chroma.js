@@ -87,13 +87,16 @@ export function updateChroma() {
   }
 
   // Harmonic leakage compensation for detection (not display).
-  // A note's 3rd harmonic lands +7 semitones up in pitch-class space
-  // (e.g. E's 3rd harmonic = B). This causes false energy in related
-  // pitch classes, confusing chords like C major vs Em. Subtract an
-  // estimate of the leaked energy before running detection.
+  // A note's harmonics bleed into other pitch classes:
+  //   2nd harmonic → +12 semitones (same pitch class, no leakage)
+  //   3rd harmonic → +19 semitones = +7 semitones mod 12 (perfect 5th up)
+  //   5th harmonic → +28 semitones = +4 semitones mod 12 (major 3rd up)
+  // This causes false energy in related pitch classes, confusing keys.
+  // Subtract leaked energy before detection.
   for (let i = 0; i < 12; i++) {
-    const source = store.chroma[(i + 5) % 12]; // bin whose 3rd harmonic falls here
-    detChroma[i] = Math.max(0, store.chroma[i] - source * 0.25);
+    const leak3rd = store.chroma[(i + 5) % 12]; // bin whose 3rd harmonic falls here
+    const leak5th = store.chroma[(i + 8) % 12]; // bin whose 5th harmonic falls here
+    detChroma[i] = Math.max(0, store.chroma[i] - leak3rd * 0.35 - leak5th * 0.15);
   }
 
   // Key detection — update every 15 frames (~4× per second) for stability
