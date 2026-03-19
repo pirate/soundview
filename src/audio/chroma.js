@@ -14,13 +14,15 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
-// Chord templates — root-position triads + 7ths
+// Chord templates — root-position triads + 7ths + sus4 + aug
 const CHORD_TYPES = [
   { name: '',    bits: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0] }, // major
   { name: 'm',   bits: [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0] }, // minor
   { name: 'dim', bits: [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0] }, // diminished
   { name: '7',   bits: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0] }, // dominant 7th
   { name: 'm7',  bits: [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0] }, // minor 7th
+  { name: 'sus4',bits: [1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0] }, // sus4
+  { name: 'aug', bits: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0] }, // augmented
 ];
 
 let sampleRate = 44100;
@@ -115,6 +117,7 @@ export function updateChroma() {
 
 function detectKey() {
   let bestCorr = -Infinity, bestRoot = 0, bestMode = 0;
+  let secondCorr = -Infinity, secondRoot = 0, secondMode = 0;
 
   for (let root = 0; root < 12; root++) {
     const corrMaj = pearson(detChroma, MAJOR_PROFILE, root);
@@ -125,10 +128,43 @@ function detectKey() {
     keyAccum[12 + root] += 0.15 * (corrMin - keyAccum[12 + root]);
 
     if (keyAccum[root] > bestCorr) {
+      secondCorr = bestCorr; secondRoot = bestRoot; secondMode = bestMode;
       bestCorr = keyAccum[root]; bestRoot = root; bestMode = 0;
+    } else if (keyAccum[root] > secondCorr) {
+      secondCorr = keyAccum[root]; secondRoot = root; secondMode = 0;
     }
     if (keyAccum[12 + root] > bestCorr) {
+      secondCorr = bestCorr; secondRoot = bestRoot; secondMode = bestMode;
       bestCorr = keyAccum[12 + root]; bestRoot = root; bestMode = 1;
+    } else if (keyAccum[12 + root] > secondCorr) {
+      secondCorr = keyAccum[12 + root]; secondRoot = root; secondMode = 1;
+    }
+  }
+
+  // Scale-fit disambiguation: Pearson correlation can be misled when a dominant
+  // chord has more energy than the tonic (e.g. harp cadenza on A7 in D major).
+  // Cross-check: the correct key should have LOW energy on non-scale tones.
+  // Compare the detected key with neighboring keys on the circle of fifths.
+  if (bestMode === 0) {
+    const MAJOR_DEGREES = [0, 2, 4, 5, 7, 9, 11]; // semitone intervals
+    let bestNonScale = 0, bestScaleE = 0;
+    for (let i = 0; i < 12; i++) {
+      if (MAJOR_DEGREES.includes((i - bestRoot + 12) % 12)) bestScaleE += detChroma[i];
+      else bestNonScale += detChroma[i];
+    }
+    // Check the key a 5th below (most common confusion: dominant → tonic)
+    const subKey = (bestRoot + 5) % 12;
+    const subCorr = keyAccum[subKey];
+    let subNonScale = 0, subScaleE = 0;
+    for (let i = 0; i < 12; i++) {
+      if (MAJOR_DEGREES.includes((i - subKey + 12) % 12)) subScaleE += detChroma[i];
+      else subNonScale += detChroma[i];
+    }
+    // Prefer the key with less non-scale energy (better scale fit)
+    // Only switch if the sub key has notably better scale fit AND reasonable correlation
+    if (subCorr > bestCorr * 0.7 && subNonScale < bestNonScale * 0.6 && subScaleE > bestScaleE * 0.8) {
+      bestRoot = subKey;
+      bestCorr = subCorr;
     }
   }
 
@@ -181,31 +217,41 @@ function detectChord() {
     return;
   }
 
-  // Diminished chord validation: diminished chords are rare and easily triggered
-  // by noise. Require them to beat the best triad by a significant margin.
-  if (bestChord && bestChord.name === 'dim') {
-    if (bestCorr < bestTriadCorr + 0.1) {
-      // Fall back to best triad
-      bestName = bestTriadName;
-      bestRoot = bestTriadRoot;
-      bestCorr = bestTriadCorr;
+  // Extended chord validation: prefer simple triads unless the extension is
+  // clearly present. This avoids false 7th/dim/sus/aug in noise or ambiguous passages
+  // while still allowing them when the evidence is clear (important for jazz, R&B).
+  if (bestChord && bestChord.name !== '' && bestChord.name !== 'm') {
+    // For dim/aug: require them to beat best triad by a margin
+    if (bestChord.name === 'dim' || bestChord.name === 'aug') {
+      if (bestCorr < bestTriadCorr + 0.08) {
+        bestName = bestTriadName;
+        bestRoot = bestTriadRoot;
+        bestCorr = bestTriadCorr;
+      }
     }
-  }
-
-  // 7th chord validation: Pearson correlation treats all template positions
-  // equally, so noise in the 7th degree can push a 7th chord above its
-  // parent triad (or vice versa). Verify the 7th note is actually prominent
-  // relative to the other chord tones; if not, downgrade to the triad.
-  if (bestChord && (bestChord.name === '7' || bestChord.name === 'm7')) {
-    const seventhEnergy = detChroma[(bestRoot + 10) % 12];
-    // Average energy of the triad tones (root, 3rd, 5th)
-    const thirdIdx = bestChord.name === '7' ? 4 : 3; // major vs minor 3rd
-    const triadAvg = (detChroma[bestRoot % 12] +
-                      detChroma[(bestRoot + thirdIdx) % 12] +
-                      detChroma[(bestRoot + 7) % 12]) / 3;
-    // Require the 7th to be at least 45% of the average triad-tone energy
-    if (seventhEnergy < triadAvg * 0.45) {
-      bestName = NOTE_NAMES[bestRoot] + (bestChord.name === '7' ? '' : 'm');
+    // For sus4: require 4th to actually be stronger than the 3rd (both major & minor)
+    // Otherwise it's just a passing tone triggering a false sus4
+    if (bestChord.name === 'sus4') {
+      const fourthE = detChroma[(bestRoot + 5) % 12];
+      const maj3rdE = detChroma[(bestRoot + 4) % 12];
+      const min3rdE = detChroma[(bestRoot + 3) % 12];
+      if (fourthE <= Math.max(maj3rdE, min3rdE) || bestCorr < bestTriadCorr + 0.05) {
+        bestName = bestTriadName;
+        bestRoot = bestTriadRoot;
+        bestCorr = bestTriadCorr;
+      }
+    }
+    // For 7th chords: verify the 7th note is actually audible
+    if (bestChord.name === '7' || bestChord.name === 'm7') {
+      const seventhEnergy = detChroma[(bestRoot + 10) % 12];
+      const thirdIdx = bestChord.name === '7' ? 4 : 3;
+      const triadAvg = (detChroma[bestRoot % 12] +
+                        detChroma[(bestRoot + thirdIdx) % 12] +
+                        detChroma[(bestRoot + 7) % 12]) / 3;
+      // Require 7th at least 40% of triad average
+      if (seventhEnergy < triadAvg * 0.40) {
+        bestName = NOTE_NAMES[bestRoot] + (bestChord.name === '7' ? '' : 'm');
+      }
     }
   }
 
