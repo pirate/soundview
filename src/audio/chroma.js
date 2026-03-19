@@ -143,7 +143,7 @@ function detectChord() {
   for (let i = 0; i < 12; i++) {
     if (detChroma[i] > chMax) chMax = detChroma[i];
   }
-  const ACTIVE_THRESHOLD = chMax * 0.2; // 20% of max
+  const ACTIVE_THRESHOLD = chMax * 0.25; // 25% of max — stricter to avoid noise chords
   let activeCount = 0;
   for (let i = 0; i < 12; i++) {
     if (detChroma[i] > ACTIVE_THRESHOLD) activeCount++;
@@ -154,25 +154,42 @@ function detectChord() {
     return;
   }
 
+  // Compare each chord type+root, but give preference to simpler chords (triads)
+  // by requiring extended chords (7ths, dim) to beat the best triad by a margin.
+  let bestTriadCorr = -Infinity, bestTriadName = '', bestTriadRoot = 0;
   let bestCorr = -Infinity, bestName = '', bestChord = null, bestRoot = 0;
 
   for (const chord of CHORD_TYPES) {
     for (let root = 0; root < 12; root++) {
       const corr = pearson(detChroma, chord.bits, root);
       if (corr > bestCorr) {
-        bestCorr = corr;
-        bestName = NOTE_NAMES[root] + chord.name;
-        bestChord = chord;
-        bestRoot = root;
+        bestCorr = corr; bestName = NOTE_NAMES[root] + chord.name;
+        bestChord = chord; bestRoot = root;
+      }
+      // Track best triad (major or minor) separately
+      if ((chord.name === '' || chord.name === 'm') && corr > bestTriadCorr) {
+        bestTriadCorr = corr; bestTriadName = NOTE_NAMES[root] + chord.name;
+        bestTriadRoot = root;
       }
     }
   }
 
   // Require meaningful correlation — below this the match is noise
-  if (bestCorr < 0.25) {
+  if (bestCorr < 0.3) {
     store.detectedChord = '';
     store.detectedChordConfidence = 0;
     return;
+  }
+
+  // Diminished chord validation: diminished chords are rare and easily triggered
+  // by noise. Require them to beat the best triad by a significant margin.
+  if (bestChord && bestChord.name === 'dim') {
+    if (bestCorr < bestTriadCorr + 0.1) {
+      // Fall back to best triad
+      bestName = bestTriadName;
+      bestRoot = bestTriadRoot;
+      bestCorr = bestTriadCorr;
+    }
   }
 
   // 7th chord validation: Pearson correlation treats all template positions
@@ -186,8 +203,8 @@ function detectChord() {
     const triadAvg = (detChroma[bestRoot % 12] +
                       detChroma[(bestRoot + thirdIdx) % 12] +
                       detChroma[(bestRoot + 7) % 12]) / 3;
-    // Require the 7th to be at least 30% of the average triad-tone energy
-    if (seventhEnergy < triadAvg * 0.3) {
+    // Require the 7th to be at least 45% of the average triad-tone energy
+    if (seventhEnergy < triadAvg * 0.45) {
       bestName = NOTE_NAMES[bestRoot] + (bestChord.name === '7' ? '' : 'm');
     }
   }
