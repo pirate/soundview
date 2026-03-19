@@ -63,6 +63,13 @@ export const store = {
   onsetBrightness: 0,
   onsetBandwidth: 0,
 
+  // ── Beat / BPM (from beat tracker) ──
+  bpm: 0,
+  beatPhaseAccuracy: 0,
+  isBeat: false,            // true on the frame a beat is detected
+  beatShowBeats: false,      // true once enough beats confirmed for display
+  beatPulse: 0,             // 0→1 pulse for beat indicator, decays each frame
+
   // ── Harmonic structure ──
   harmonicAmplitudes: new Float32Array(32),
   harmonicAmplitudesRaw: new Float32Array(32),  // raw power (before normalization)

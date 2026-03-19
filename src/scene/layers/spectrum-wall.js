@@ -214,71 +214,9 @@ export function createSpectrumWall() {
   document.body.appendChild(overlay);
   const oCtx = overlay.getContext('2d');
 
-  // ── BTrack beat tracker state ──
-  const BT_BUF_LEN = 512, BT_MIN_LAG = 22, BT_MAX_LAG = 60;
-  const btOdf = new Float32Array(BT_BUF_LEN);
-  const btCumScore = new Float32Array(BT_BUF_LEN);
-  let btIdx = 0, btPeriod = 0, btCounter = 999, btOdfEnergy = 0;
-  let btConfirmedBeats = 0, btShowBeats = false, btSilenceTimer = 0, btFrameCount = 0;
-  let beatFlash = 0, btBeatCount = 0, btShowBpm = 0, btLastBeatTime = 0;
-  let prevFlux = 0, beatPulse = 0, btPhaseAccuracy = 0, btTempoCounter = 0;
-
-  function btGaussWeight(dist, period) {
-    const sigma = period * 0.15;
-    return Math.exp(-0.5 * (dist * dist) / (sigma * sigma));
-  }
-
-  const btACorrBuf = new Float32Array(BT_MAX_LAG + 2);
-  function btEstimateTempo() {
-    for (let lag = BT_MIN_LAG; lag <= BT_MAX_LAG; lag++) {
-      let corr = 0;
-      const n = BT_BUF_LEN - lag;
-      for (let i = 0; i < n; i++) {
-        const a = (btIdx - 1 - i + BT_BUF_LEN) % BT_BUF_LEN;
-        const b = (a - lag + BT_BUF_LEN) % BT_BUF_LEN;
-        corr += btOdf[a] * btOdf[b];
-      }
-      btACorrBuf[lag] = corr;
-    }
-    let bestLag = BT_MIN_LAG;
-    for (let lag = BT_MIN_LAG + 1; lag <= BT_MAX_LAG; lag++) {
-      if (btACorrBuf[lag] > btACorrBuf[bestLag]) bestLag = lag;
-    }
-    // Compound time resolution: check if 1.5x lag (dotted beat) is a strong peak
-    // This handles 6/8, 9/8, 12/8 where the onset detector picks up subdivisions
-    const compoundLag = Math.round(bestLag * 1.5);
-    if (compoundLag >= BT_MIN_LAG && compoundLag <= BT_MAX_LAG) {
-      const isLocalPeak = compoundLag > BT_MIN_LAG && compoundLag < BT_MAX_LAG &&
-        btACorrBuf[compoundLag] > btACorrBuf[compoundLag - 1] &&
-        btACorrBuf[compoundLag] > btACorrBuf[compoundLag + 1];
-      if (isLocalPeak && btACorrBuf[compoundLag] > btACorrBuf[bestLag] * 0.6) bestLag = compoundLag;
-    }
-    // Double-time resolution: check if 2x lag (half tempo) is strong
-    // Prefer slower tempo when both are viable (avoids double-time in slow pieces)
-    const doubleLag = bestLag * 2;
-    if (doubleLag >= BT_MIN_LAG && doubleLag <= BT_MAX_LAG) {
-      const dl = Math.round(doubleLag);
-      if (dl > BT_MIN_LAG && dl < BT_MAX_LAG) {
-        const isLocalPeak = btACorrBuf[dl] > btACorrBuf[dl - 1] && btACorrBuf[dl] > btACorrBuf[dl + 1];
-        if (isLocalPeak && btACorrBuf[dl] > btACorrBuf[bestLag] * 0.5) bestLag = dl;
-      }
-    }
-    // Octave resolution: prefer faster tempo if half-lag is strong
-    const halfLag = Math.round(bestLag / 2);
-    if (halfLag >= BT_MIN_LAG + 2 && halfLag <= BT_MAX_LAG - 2) {
-      const isLocalPeak = btACorrBuf[halfLag] > btACorrBuf[halfLag - 1] && btACorrBuf[halfLag] > btACorrBuf[halfLag + 1];
-      if (isLocalPeak && btACorrBuf[halfLag] > btACorrBuf[bestLag] * 0.75) bestLag = halfLag;
-    }
-    if (bestLag > BT_MIN_LAG && bestLag < BT_MAX_LAG) {
-      const prev = btACorrBuf[bestLag - 1], curr = btACorrBuf[bestLag], next = btACorrBuf[bestLag + 1];
-      const denom = prev - 2 * curr + next;
-      if (denom < -1e-12) {
-        const shift = 0.5 * (prev - next) / denom;
-        return bestLag + Math.max(-0.5, Math.min(0.5, shift));
-      }
-    }
-    return bestLag;
-  }
+  // ── Beat rendering state (beat detection now runs in features pipeline via beat.js) ──
+  let btFrameCount = 0;
+  let beatFlash = 0;
 
   // ── Pre-allocated buffers ──
   const colImg = ctx.createImageData(1, COCHLEA_H);
@@ -810,92 +748,32 @@ export function createSpectrumWall() {
 
 
       // ════════════════════════════════════════
-      // BEAT DETECTION (columns spanning all strips)
+      // BEAT RENDERING (reads from store, computed in features pipeline)
       // ════════════════════════════════════════
       btFrameCount++;
-      const odfVal = s.spectralFlux;
-      btOdf[btIdx] = odfVal;
 
-      if (btPeriod > 0) {
-        const lookStart = Math.max(1, Math.round(btPeriod * 0.5));
-        const lookEnd = Math.round(btPeriod * 2);
-        let maxWeighted = 0;
-        for (let i = lookStart; i <= lookEnd; i++) {
-          const pastIdx = (btIdx - i + BT_BUF_LEN) % BT_BUF_LEN;
-          const dist = Math.abs(i - Math.round(btPeriod));
-          const val = btCumScore[pastIdx] * btGaussWeight(dist, btPeriod);
-          if (val > maxWeighted) maxWeighted = val;
-        }
-        btCumScore[btIdx] = odfVal + maxWeighted;
-      } else {
-        btCumScore[btIdx] = odfVal;
-      }
-      btIdx = (btIdx + 1) % BT_BUF_LEN;
-
-      btCounter--;
-      if (btCounter <= 0) {
-        const searchBack = Math.round(btPeriod);
-        let bestScore = 0, bestOffset = 0;
-        for (let i = 0; i < searchBack; i++) {
-          const idx = (btIdx - 1 - i + BT_BUF_LEN) % BT_BUF_LEN;
-          if (btCumScore[idx] > bestScore) { bestScore = btCumScore[idx]; bestOffset = i; }
-        }
-        const beatHadEnergy = bestScore > 0.01 && btOdfEnergy > 0.01;
-        if (beatHadEnergy && btPeriod > 0) {
-          btConfirmedBeats++;
-          btSilenceTimer = 0;
-          const phaseHit = 1 - Math.min(1, bestOffset / (btPeriod * 0.5));
-          btPhaseAccuracy = btPhaseAccuracy * 0.7 + phaseHit * 0.3;
-          if (btConfirmedBeats >= 6) btShowBeats = true;
-          if (btShowBeats) {
-            beatFlash = 5; beatPulse = 1; btLastBeatTime = time; btBeatCount++;
-            if (btBeatCount % 10 === 0) btShowBpm = Math.round(3600 / btPeriod);
-          }
-        } else { btConfirmedBeats = Math.max(0, btConfirmedBeats - 1); }
-        btCounter = Math.round(btPeriod) - Math.round(bestOffset * 0.2);
-        btCounter = Math.max(Math.round(btPeriod * 0.7), btCounter);
-      }
-
-      btOdfEnergy = btOdfEnergy * 0.99 + odfVal * odfVal * 0.01;
-
-      btTempoCounter++;
-      if (btTempoCounter >= 30) {
-        btTempoCounter = 0;
-        const newPeriod = btEstimateTempo();
-        if (newPeriod >= BT_MIN_LAG && newPeriod <= BT_MAX_LAG) {
-          if (btPeriod === 0) { btPeriod = newPeriod; btCounter = newPeriod; }
-          else {
-            const err = Math.abs(newPeriod - btPeriod) / btPeriod;
-            const alpha = err > 0.15 ? 0.5 : err > 0.05 ? 0.3 : 0.15;
-            btPeriod += alpha * (newPeriod - btPeriod);
-          }
-        }
-      }
-
-      btSilenceTimer++;
-      if (btShowBeats && btSilenceTimer > 600) {
-        btShowBeats = false; btConfirmedBeats = 0; btBeatCount = 0;
-        btShowBpm = 0; btPeriod = 0; btCounter = 999;
+      // Beat flash on detected beat
+      if (s.isBeat && s.beatShowBeats) {
+        beatFlash = 5;
       }
 
       // Draw beat columns spanning all strips
-      if (beatFlash > 0 && btShowBeats) {
+      if (beatFlash > 0 && s.beatShowBeats) {
         beatFlash--;
-        const pa = btPhaseAccuracy;
+        const pa = s.beatPhaseAccuracy;
         const bR = Math.round(pa < 0.5 ? 255 : 255 * (1 - (pa - 0.5) * 2));
         const bG = Math.round(pa < 0.5 ? pa * 2 * 180 : 80 + 175 * (pa - 0.5) * 2);
         const bB = Math.round(20 * (1 - pa));
         ctx.fillStyle = `rgba(${bR},${bG},${bB},${(beatFlash / 5) * 0.3})`;
         ctx.fillRect(rightX, 0, scrollSpeed, CANVAS_H);
 
-        if (beatFlash === 4 && btShowBpm > 0) {
+        if (beatFlash === 4 && s.bpm > 0) {
           const fontSize = Math.round(CANVAS_H * 0.018);
           ctx.font = `bold ${fontSize}px sans-serif`;
           ctx.fillStyle = 'rgba(255,255,255,0.9)';
-          ctx.fillText(`${btShowBpm}`, rightX - fontSize * 2, SPEECH_Y + SPEECH_H - 4);
-          btShowBpm = 0;
+          ctx.fillText(`${s.bpm}`, rightX - fontSize * 2, SPEECH_Y + SPEECH_H - 4);
         }
-      } else if (!btShowBeats) { beatFlash = 0; }
+      } else if (!s.beatShowBeats) { beatFlash = 0; }
 
       // Broadband transient detection
       let brightBins = 0;
@@ -975,20 +853,18 @@ export function createSpectrumWall() {
       }
 
       // ── Beat indicator circle (upper-right) ──
-      if (btShowBeats) {
+      if (s.beatShowBeats) {
         const pad = Math.round(16 * DPR), circR = Math.round(14 * DPR);
         const bx = CANVAS_W - ARROW_W / 2, by = pad + circR;
-        const pa = btPhaseAccuracy;
+        const pa = s.beatPhaseAccuracy;
         const cR = Math.round(pa < 0.5 ? 255 : 255 * (1 - (pa - 0.5) * 2));
         const cG = Math.round(pa < 0.5 ? pa * 2 * 180 : 80 + 175 * (pa - 0.5) * 2);
         const cB = Math.round(20 * (1 - pa));
-        if (beatPulse > 0) {
-          oCtx.beginPath(); oCtx.arc(bx, by, Math.round(circR * (0.7 + 0.3 * beatPulse)), 0, Math.PI * 2);
-          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${beatPulse})`; oCtx.fill();
+        if (s.beatPulse > 0) {
+          oCtx.beginPath(); oCtx.arc(bx, by, Math.round(circR * (0.7 + 0.3 * s.beatPulse)), 0, Math.PI * 2);
+          oCtx.fillStyle = `rgba(${cR},${cG},${cB},${s.beatPulse})`; oCtx.fill();
         }
       }
-      beatPulse *= 0.88;
-      if (beatPulse < 0.01) beatPulse = 0;
 
 
       // ── Circle of Fifths (bottom-left, above timbre map) ──

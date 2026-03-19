@@ -1,100 +1,90 @@
 // Offline audio analysis test harness.
-// Runs the ACTUAL chroma.js / features.js / timbre.js code against real audio files.
-// No reimplemented algorithms — this exercises the production code paths.
+// Uses node-web-audio-api to run the EXACT same code path as the browser.
+// No mocks, no polyfills, no separate offline implementations.
+// Audio is fed through OfflineAudioContext → AnalyserNode → the real features pipeline.
 
 import { readFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
+import { OfflineAudioContext } from 'node-web-audio-api';
 
-// ── Import the real modules ──
+// ── Import the real modules (same ones the browser uses) ──
 import { store } from '../src/store/feature-store.js';
-import { initFeaturesOffline, updateFeaturesFromBuffers } from '../src/audio/features.js';
+import { initFeatures, setAnalyser, updateFeatures } from '../src/audio/features.js';
+import { createFilterbank } from '../src/audio/filterbank.js';
 import { initPitch } from '../src/audio/pitch.js';
 
 const SR = 44100;
 const FFT_SIZE = 8192;
-const HOP = 2048; // ~21ms, ~46 fps
+const RENDER_QUANTUM = 128; // Web Audio renders in 128-sample blocks
 
-// ── Minimal FFT (Cooley-Tukey radix-2) ──
-function fft(re, im) {
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    while (j & bit) { j ^= bit; bit >>= 1; }
-    j ^= bit;
-    if (i < j) {
-      [re[i], re[j]] = [re[j], re[i]];
-      [im[i], im[j]] = [im[j], im[i]];
-    }
+// Convert mp3 to wav for loading into AudioBuffer
+function loadAudioBuffer(ctx, mp3Path) {
+  const wavPath = mp3Path.replace(/\.mp3$/, '.wav');
+  if (!existsSync(wavPath)) {
+    console.log(`  Converting ${mp3Path} → wav...`);
+    execSync(`ffmpeg -y -i "${mp3Path}" -ar ${SR} -ac 1 -f wav "${wavPath}" 2>/dev/null`);
   }
-  for (let len = 2; len <= n; len <<= 1) {
-    const halfLen = len >> 1;
-    const angle = -2 * Math.PI / len;
-    const wRe = Math.cos(angle), wIm = Math.sin(angle);
-    for (let i = 0; i < n; i += len) {
-      let curRe = 1, curIm = 0;
-      for (let j = 0; j < halfLen; j++) {
-        const tRe = curRe * re[i + j + halfLen] - curIm * im[i + j + halfLen];
-        const tIm = curRe * im[i + j + halfLen] + curIm * re[i + j + halfLen];
-        re[i + j + halfLen] = re[i + j] - tRe;
-        im[i + j + halfLen] = im[i + j] - tIm;
-        re[i + j] += tRe;
-        im[i + j] += tIm;
-        const nextRe = curRe * wRe - curIm * wIm;
-        curIm = curRe * wIm + curIm * wRe;
-        curRe = nextRe;
-      }
-    }
-  }
-}
-
-// Convert mp3 to raw PCM if needed
-function loadAudio(mp3Path) {
+  const wavData = readFileSync(wavPath);
+  // Parse WAV: skip 44-byte header, read f32 PCM (or decode via context)
+  // Actually, let's use raw PCM for simplicity
   const rawPath = mp3Path.replace(/\.mp3$/, '.raw');
   if (!existsSync(rawPath)) {
-    console.log(`  Converting ${mp3Path} → raw PCM...`);
     execSync(`ffmpeg -y -i "${mp3Path}" -f f32le -acodec pcm_f32le -ar ${SR} -ac 1 "${rawPath}" 2>/dev/null`);
   }
   const raw = readFileSync(rawPath);
-  return new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
+  const samples = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
+
+  const buffer = ctx.createBuffer(1, samples.length, SR);
+  // copyToChannel is safer per node-web-audio-api docs
+  buffer.copyToChannel(samples, 0);
+  return { buffer, samples };
 }
 
-// Pre-compute Hann window
-const hann = new Float32Array(FFT_SIZE);
-for (let i = 0; i < FFT_SIZE; i++) hann[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (FFT_SIZE - 1)));
-
-// Compute FFT and return dB spectrum (like getFloatFrequencyData)
-function computeSpectrum(samples, offset) {
-  const re = new Float64Array(FFT_SIZE);
-  const im = new Float64Array(FFT_SIZE);
-  for (let i = 0; i < FFT_SIZE; i++) {
-    re[i] = (offset + i < samples.length) ? samples[offset + i] * hann[i] : 0;
-    im[i] = 0;
-  }
-  fft(re, im);
-  const specDb = new Float32Array(FFT_SIZE / 2);
-  for (let i = 0; i < FFT_SIZE / 2; i++) {
-    const mag = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
-    specDb[i] = 20 * Math.log10(Math.max(1e-10, mag / FFT_SIZE));
-  }
-  return specDb;
-}
-
-// ══════════════════════════════════════════════════════════════
-// Test runner
-// ══════════════════════════════════════════════════════════════
-
-function analyzeFile(audioPath, label) {
+// Process audio through the real pipeline frame by frame.
+// We use OfflineAudioContext to render in chunks, reading the analyser each chunk.
+async function analyzeFile(audioPath, label) {
   console.log(`\n${'═'.repeat(60)}`);
   console.log(label);
   console.log('═'.repeat(60));
 
-  const samples = loadAudio(audioPath);
+  // Create offline audio context for the full duration
+  const rawPath = audioPath.replace(/\.mp3$/, '.raw');
+  if (!existsSync(rawPath)) {
+    execSync(`ffmpeg -y -i "${audioPath}" -f f32le -acodec pcm_f32le -ar ${SR} -ac 1 "${rawPath}" 2>/dev/null`);
+  }
+  const raw = readFileSync(rawPath);
+  const samples = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
   const duration = samples.length / SR;
   console.log(`  ${duration.toFixed(1)}s, ${samples.length} samples`);
 
-  // Reset store state
+  // We'll process in chunks to simulate real-time frame-by-frame analysis.
+  // Each chunk = HOP samples. We create a new OfflineAudioContext per chunk
+  // (expensive but correct — the analyser gives us fresh data each time).
+  // Better approach: process in one go but use ScriptProcessorNode to capture frames.
+
+  // Actually, the most faithful approach: render the full audio, but process
+  // it frame-by-frame through our pipeline by manually feeding the analyser.
+  // Since OfflineAudioContext renders all at once, we'll use a single context
+  // and read the analyser state after rendering.
+  //
+  // But the analyser only retains the LAST frame's data after offline rendering.
+  // So instead: process in overlapping windows, each one a small OfflineAudioContext.
+
+  // Simplest correct approach: create one OfflineAudioContext per analysis frame.
+  // Each frame processes FFT_SIZE samples. Hop = FFT_SIZE/4 for overlap.
+  const HOP = 2048;
+  const numFrames = Math.floor((samples.length - FFT_SIZE) / HOP);
+  console.log(`  Processing ${numFrames} frames (HOP=${HOP})...`);
+
+  // Reset store
   store.spectrumDb.fill(-100);
   store.chroma.fill(0);
+  store.bandEnergy.fill(0);
+  store.bandEnergySmooth.fill(0);
+  store.bandPeak.fill(0);
+  store.bandEnvelopeDelta.fill(0);
+  store.bandPeriodicity.fill(0);
+  store.bandRoughness.fill(0);
   store.detectedKey = '';
   store.detectedKeyConfidence = 0;
   store.detectedChord = '';
@@ -114,30 +104,67 @@ function analyzeFile(audioPath, label) {
   store.spectralFlux = 0;
   store.spectralFluxSmooth = 0;
   store.historyIndex = 0;
+  store.bpm = 0;
+  store.beatPhaseAccuracy = 0;
 
-  // Initialize the real modules in offline mode
-  initPitch(SR);
-  initFeaturesOffline(SR, FFT_SIZE);
-
-  // Per-second chord/note tracking
-  const chordLog = [];     // { sec, chord, conf }
-  const keyLog = [];       // { sec, key, conf }
-  const noteLog = [];      // { sec, pitchClasses }
+  // Per-frame: create a tiny OfflineAudioContext, load the chunk, render, read analyser
+  const chordLog = [];
+  const noteLog = [];
   let frameCount = 0;
 
-  // Process frames
-  for (let offset = 0; offset + FFT_SIZE <= samples.length; offset += HOP) {
-    const timeDomain = samples.subarray(offset, offset + FFT_SIZE);
-    const freqData = computeSpectrum(samples, offset);
+  for (let frame = 0; frame < numFrames; frame++) {
+    const offset = frame * HOP;
 
-    // Feed into the REAL features pipeline
-    updateFeaturesFromBuffers(timeDomain, freqData);
+    // Create a context just big enough for one analyser read
+    // The analyser needs at least fftSize samples to produce a valid FFT
+    const ctx = new OfflineAudioContext(1, FFT_SIZE, SR);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0;
+
+    // Create filterbank for this context (populates bands + store.centerFreqs)
+    // Only on first frame — subsequent frames reuse the same store.centerFreqs
+    if (frame === 0) {
+      const inputGain = ctx.createGain();
+      inputGain.gain.value = 1.0;
+
+      // Create buffer with this chunk
+      const buf = ctx.createBuffer(1, FFT_SIZE, SR);
+      buf.copyToChannel(samples.subarray(offset, offset + FFT_SIZE), 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(inputGain);
+      inputGain.connect(analyser);
+      analyser.connect(ctx.destination);
+
+      // Init filterbank + features with this context (sets up bands, center freqs)
+      createFilterbank(ctx, inputGain);
+      initPitch(SR);
+      initFeatures(analyser, SR);
+
+      src.start();
+      await ctx.startRendering();
+    } else {
+      // For subsequent frames: create minimal context, just buffer → analyser
+      const buf = ctx.createBuffer(1, FFT_SIZE, SR);
+      buf.copyToChannel(samples.subarray(offset, offset + FFT_SIZE), 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(analyser);
+      analyser.connect(ctx.destination);
+      src.start();
+      await ctx.startRendering();
+    }
+
+    // Swap in this frame's analyser and run the real pipeline
+    setAnalyser(analyser);
+    updateFeatures();
     frameCount++;
 
     const sec = offset / SR;
 
     // Log chord every ~0.5s
-    if (frameCount % 23 === 0) {
+    if (frameCount % 10 === 0) {
       chordLog.push({
         sec: Math.round(sec * 10) / 10,
         chord: store.detectedChord,
@@ -145,19 +172,10 @@ function analyzeFile(audioPath, label) {
       });
     }
 
-    // Log key every ~2s
-    if (frameCount % 92 === 0) {
-      keyLog.push({
-        sec: Math.round(sec),
-        key: store.detectedKey,
-        conf: store.detectedKeyConfidence,
-      });
-    }
-
-    // Log active pitch classes every ~1s
-    if (frameCount % 46 === 0) {
-      const activePCs = [];
+    // Log active pitch classes every ~2s
+    if (frameCount % 40 === 0) {
       const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+      const activePCs = [];
       for (let i = 0; i < 12; i++) {
         if (store.chroma[i] > 0.15) activePCs.push(NOTE_NAMES[i]);
       }
@@ -165,12 +183,13 @@ function analyzeFile(audioPath, label) {
     }
   }
 
-  console.log(`  Processed ${frameCount} frames\n`);
+  console.log(`  Processed ${frameCount} frames`);
 
-  // Final detected key
-  console.log(`  Key: ${store.detectedKey} (conf: ${store.detectedKeyConfidence.toFixed(3)})`);
+  // Results
+  console.log(`\n  Key: ${store.detectedKey} (conf: ${store.detectedKeyConfidence.toFixed(3)})`);
+  console.log(`  BPM: ${store.bpm}`);
 
-  // Chord timeline (5s windows)
+  // Chord timeline
   console.log('\n  Chord timeline:');
   const totalSec = Math.floor(duration);
   for (let t = 0; t < totalSec; t += 5) {
@@ -185,7 +204,7 @@ function analyzeFile(audioPath, label) {
 
   // Note activity
   console.log('\n  Active pitch classes (sampled):');
-  for (const entry of noteLog.filter((_, i) => i % 4 === 0).slice(0, 20)) {
+  for (const entry of noteLog.filter((_, i) => i % 2 === 0).slice(0, 15)) {
     if (entry.pcs.length > 0) {
       const m = Math.floor(entry.sec / 60), s = entry.sec % 60;
       console.log(`    ${m}:${String(s).padStart(2, '0')}  ${entry.pcs.join(' ')}`);
@@ -195,13 +214,14 @@ function analyzeFile(audioPath, label) {
   return {
     key: store.detectedKey,
     keyConf: store.detectedKeyConfidence,
+    bpm: store.bpm,
     chordLog,
     noteLog,
   };
 }
 
 // ══════════════════════════════════════════════════════════════
-// Download test files if needed
+// Test definitions
 // ══════════════════════════════════════════════════════════════
 const TESTS = [
   {
@@ -209,6 +229,8 @@ const TESTS = [
     file: 'test/waltz.mp3',
     label: 'WALTZ OF THE FLOWERS (expect: D major)',
     expectKey: 'D maj',
+    expectBpm: 180,
+    bpmTolerance: 30,
     inKeyChords: new Set(['D', 'G', 'A', 'Bm', 'Em', 'F#m', 'A7', 'D7', 'E', 'Am', 'C', 'F#7',
       'Em7', 'F#m7', 'Am7', 'Gsus4', 'Dsus4', 'Asus4']),
     expectScale: new Set(['D', 'E', 'F#', 'G', 'A', 'B', 'C#']),
@@ -218,28 +240,28 @@ const TESTS = [
     file: 'test/claire.mp3',
     label: 'CLAIRE DE LUNE (expect: C#/Db major)',
     expectKey: 'C# maj',
-    // Include diatonic triads, 7ths, and sus4 chords built on scale degrees
+    expectBpm: 73.5,
+    bpmTolerance: 15,
     inKeyChords: new Set(['C#', 'G#', 'A#m', 'F#', 'D#m', 'G#7', 'Fm', 'C#7', 'F#m',
       'D#m7', 'Fm7', 'A#m7', 'C#sus4', 'G#sus4', 'D#sus4', 'A#sus4', 'F#m7']),
     expectScale: new Set(['C#', 'D#', 'F', 'F#', 'G#', 'A#', 'C']),
   },
   {
-    url: null, // already downloaded via zip
+    url: null,
     file: 'test/maple-leaf.mp3',
-    label: 'MAPLE LEAF RAG (expect: G# maj = Ab major, modulates to Db)',
-    expectKey: 'G# maj', // Ab major in our sharp notation
-    // Ab major diatonic: Ab(G#), Bb(A#)m, Cdim, Db(C#), Eb(D#), Fm, G dim
-    // Plus Db major (trio): Db(C#), Eb(D#)m, Fm, Gb(F#), Ab(G#), Bb(A#)m
+    label: 'MAPLE LEAF RAG (expect: G# maj = Ab major)',
+    expectKey: 'G# maj',
+    expectBpm: 92,
+    bpmTolerance: 15,
     inKeyChords: new Set(['G#', 'A#m', 'C#', 'D#', 'Fm', 'D#7', 'G#7', 'C#7',
       'Cm', 'Cdim', 'D#m', 'F#', 'A#m7', 'Fm7', 'G#sus4', 'D#sus4',
       'C#sus4', 'F', 'A#', 'Gm', 'Bdim']),
-    expectScale: new Set(['G#', 'A#', 'C', 'C#', 'D#', 'F', 'G']), // Ab major
+    expectScale: new Set(['G#', 'A#', 'C', 'C#', 'D#', 'F', 'G']),
   },
 ];
 
-// Ensure test directory exists
+// Download test files if needed
 execSync('mkdir -p test');
-
 for (const t of TESTS) {
   if (!existsSync(t.file) && t.url) {
     console.log(`Downloading ${t.file}...`);
@@ -250,7 +272,7 @@ for (const t of TESTS) {
 // Run analysis
 const results = [];
 for (const t of TESTS) {
-  const r = analyzeFile(t.file, t.label);
+  const r = await analyzeFile(t.file, t.label);
   results.push({ ...t, ...r });
 }
 
@@ -262,16 +284,27 @@ console.log('VERIFICATION');
 console.log('═'.repeat(60));
 
 let allPass = true;
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 
 for (const r of results) {
   console.log(`\n  ${r.label.split('(')[0].trim()}:`);
 
-  // Key check
+  // Key
   const keyPass = r.key === r.expectKey;
   console.log(`    Key: ${r.key} ${keyPass ? '✓' : '✗ (expected ' + r.expectKey + ')'}`);
   if (!keyPass) allPass = false;
 
-  // Chord in-key percentage
+  // BPM
+  if (r.expectBpm) {
+    const bpmErr = Math.abs(r.bpm - r.expectBpm);
+    const halfErr = Math.abs(r.bpm - r.expectBpm / 2);
+    const dblErr = Math.abs(r.bpm - r.expectBpm * 2);
+    const bpmPass = bpmErr <= r.bpmTolerance || halfErr <= r.bpmTolerance || dblErr <= r.bpmTolerance;
+    console.log(`    BPM: ${r.bpm} (expect ~${r.expectBpm}) ${bpmPass ? '✓' : '✗'}`);
+    if (!bpmPass) allPass = false;
+  }
+
+  // Chords
   const validChords = r.chordLog.filter(c => c.chord);
   const inKey = validChords.filter(c => r.inKeyChords.has(c.chord));
   const pct = validChords.length > 0 ? (inKey.length / validChords.length * 100) : 0;
@@ -279,12 +312,12 @@ for (const r of results) {
   console.log(`    Chords in-key: ${inKey.length}/${validChords.length} (${pct.toFixed(0)}%) ${chordPass ? '✓' : '✗'}`);
   if (!chordPass) allPass = false;
 
-  // Scale fitness: are detected pitch classes mostly in the expected scale?
+  // Scale
   const allPCs = new Set();
   for (const n of r.noteLog) for (const pc of n.pcs) allPCs.add(pc);
   const inScale = [...allPCs].filter(pc => r.expectScale.has(pc));
   const scalePass = inScale.length >= r.expectScale.size * 0.7;
-  console.log(`    Scale fit: ${inScale.length}/${allPCs.size} detected PCs in scale (${inScale.join(',')}) ${scalePass ? '✓' : '✗'}`);
+  console.log(`    Scale fit: ${inScale.length}/${allPCs.size} PCs in scale ${scalePass ? '✓' : '✗'}`);
   if (!scalePass) allPass = false;
 }
 
