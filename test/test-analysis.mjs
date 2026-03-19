@@ -223,13 +223,25 @@ const TESTS = [
       'D#m7', 'Fm7', 'A#m7', 'C#sus4', 'G#sus4', 'D#sus4', 'A#sus4', 'F#m7']),
     expectScale: new Set(['C#', 'D#', 'F', 'F#', 'G#', 'A#', 'C']),
   },
+  {
+    url: null, // already downloaded via zip
+    file: 'test/maple-leaf.mp3',
+    label: 'MAPLE LEAF RAG (expect: G# maj = Ab major, modulates to Db)',
+    expectKey: 'G# maj', // Ab major in our sharp notation
+    // Ab major diatonic: Ab(G#), Bb(A#)m, Cdim, Db(C#), Eb(D#), Fm, G dim
+    // Plus Db major (trio): Db(C#), Eb(D#)m, Fm, Gb(F#), Ab(G#), Bb(A#)m
+    inKeyChords: new Set(['G#', 'A#m', 'C#', 'D#', 'Fm', 'D#7', 'G#7', 'C#7',
+      'Cm', 'Cdim', 'D#m', 'F#', 'A#m7', 'Fm7', 'G#sus4', 'D#sus4',
+      'C#sus4', 'F', 'A#', 'Gm', 'Bdim']),
+    expectScale: new Set(['G#', 'A#', 'C', 'C#', 'D#', 'F', 'G']), // Ab major
+  },
 ];
 
 // Ensure test directory exists
 execSync('mkdir -p test');
 
 for (const t of TESTS) {
-  if (!existsSync(t.file)) {
+  if (!existsSync(t.file) && t.url) {
     console.log(`Downloading ${t.file}...`);
     execSync(`curl -L -o "${t.file}" "${t.url}" 2>/dev/null`);
   }
