@@ -1,4 +1,7 @@
 // Cochlear-style log-spaced filterbank: 28 bands from 30Hz–20kHz.
+// READS: nothing
+// WRITES: store.centerFreqs, creates bandpass filter + analyser per band
+// DEPENDS ON: audio-engine (needs AudioContext + inputGain)
 
 import { NUM_BANDS, store } from '../store/feature-store.js';
 
@@ -16,7 +19,6 @@ export function createFilterbank(audioContext, inputNode) {
     const centerFreq = MIN_FREQ * Math.pow(MAX_FREQ / MIN_FREQ, t);
     store.centerFreqs[i] = centerFreq;
 
-    // ~1/3 octave bandwidth
     const bandwidth = centerFreq * 0.2316;
     const Q = centerFreq / bandwidth;
 

@@ -1,4 +1,6 @@
-// Shared typed-array data bus between audio engine and scene renderer.
+// Shared typed-array data bus between audio modules and renderers.
+// Every module writes its outputs here; other modules and renderers read directly.
+// The dependency order in the pipeline guarantees reads see fresh data each frame.
 
 export const NUM_BANDS = 28;       // 30Hz–20kHz, ~1/3 octave
 export const HISTORY_LEN = 128;    // frames of history (~2.1s at 60fps)
@@ -6,41 +8,32 @@ export const SPECTRUM_BINS = 4096; // half of FFT size 8192
 export const NUM_MOD_BANDS = 7;    // 6 envelope-rate bands + 1 roughness band
 
 export const store = {
-  // ── Per-band data ──
+  // ── Per-band data (owned by energy module) ──
   bandEnergy: new Float32Array(NUM_BANDS),
   bandEnergySmooth: new Float32Array(NUM_BANDS),
   bandPeak: new Float32Array(NUM_BANDS),
   bandEnvelopeDelta: new Float32Array(NUM_BANDS),
   bandPeriodicity: new Float32Array(NUM_BANDS),
-  bandRoughness: new Float32Array(NUM_BANDS),    // amplitude variance within buffer
+  bandRoughness: new Float32Array(NUM_BANDS),
   bandHistory: Array.from({ length: NUM_BANDS }, () => new Float32Array(HISTORY_LEN)),
   historyIndex: 0,
   centerFreqs: new Float32Array(NUM_BANDS),
 
-  // ── Per-band modulation spectrum (NUM_BANDS × NUM_MOD_BANDS) ──
-  // Bands: [<1Hz, 1-2Hz, 2-4Hz, 4-8Hz, 8-16Hz, 16-30Hz, roughness(30-300Hz)]
+  // ── Per-band modulation spectrum (owned by modulation module) ──
   bandModulation: new Float32Array(NUM_BANDS * NUM_MOD_BANDS),
 
-  // ── Full spectrum (for spectrum wall + analysis) ──
+  // ── Full spectrum (owned by spectrum module) ──
   spectrumDb: new Float32Array(SPECTRUM_BINS).fill(-100),
 
-  // ── Pitch ──
-  pitch: 0,
-  pitchConfidence: 0,
-  pitchSmooth: 0,
-  pitchHistory: new Float32Array(HISTORY_LEN),
-  pitchHistoryIndex: 0,
-
-  // ── Timbral shape ──
+  // ── Spectral shape (owned by spectrum module) ──
   spectralCentroid: 0,
   spectralCentroidSmooth: 0,
   spectralSpread: 0,
   spectralFlatness: 0,
   spectralSlope: 0,
   spectralRolloff: 0,
-  harmonicity: 0,
 
-  // ── Dynamics ──
+  // ── Dynamics (owned by energy module) ──
   rms: 0,
   rmsSmooth: 0,
   overallLoudness: 0,
@@ -48,71 +41,76 @@ export const store = {
   signalAboveNoise: 0,
   signalPresent: false,
 
-  // ── Modulation (global) ──
+  // ── Modulation (owned by energy module) ──
   modulationDepth: 0,
   modulationRate: 0,
 
-  // ── Noisiness decomposition ──
+  // ── Noisiness (owned by spectrum module) ──
   noisiness: 0,
   noiseEnergy: 0,
   tonalEnergy: 0,
 
-  // ── Onsets ──
+  // ── Pitch (owned by pitch module) ──
+  pitch: 0,
+  pitchConfidence: 0,
+  pitchSmooth: 0,
+  pitchHistory: new Float32Array(HISTORY_LEN),
+  pitchHistoryIndex: 0,
+
+  // ── Harmonics (owned by harmonics module) ──
+  harmonicity: 0,
+  harmonicAmplitudes: new Float32Array(32),
+  harmonicAmplitudesRaw: new Float32Array(32),
+
+  // ── Onsets (owned by onset module) ──
   onsetStrength: 0,
   isOnset: false,
   onsetBrightness: 0,
   onsetBandwidth: 0,
 
-  // ── Beat / BPM (from beat tracker) ──
+  // ── Beat / BPM (owned by beat module) ──
   bpm: 0,
   beatPhaseAccuracy: 0,
-  isBeat: false,            // true on the frame a beat is detected
-  beatShowBeats: false,      // true once enough beats confirmed for display
-  beatPulse: 0,             // 0→1 pulse for beat indicator, decays each frame
+  isBeat: false,
+  beatShowBeats: false,
+  beatPulse: 0,
 
-  // ── Harmonic structure ──
-  harmonicAmplitudes: new Float32Array(32),
-  harmonicAmplitudesRaw: new Float32Array(32),  // raw power (before normalization)
-
-  // ── Formants ──
-  formant1: 0,           // F1 frequency (Hz), 0 = not detected
-  formant2: 0,           // F2 frequency (Hz), 0 = not detected
-  formant3: 0,           // F3 frequency (Hz), 0 = not detected
-  formant1Smooth: 0,     // smoothed for display
+  // ── Formants (owned by formants module) ──
+  formant1: 0,
+  formant2: 0,
+  formant3: 0,
+  formant1Smooth: 0,
   formant2Smooth: 0,
   formant3Smooth: 0,
-
-  // ── Sound classification ──
-  // 0=silence, 1=voiced_harmonic (vowel), 2=voiced_noisy, 3=fricative, 4=plosive, 5=nasal
   soundClass: 0,
   _plosiveHold: 0,
 
-  // ── Spectral flux ──
-  spectralFlux: 0,       // rate of spectral change (0-1)
+  // ── Spectral flux (owned by formants module) ──
+  spectralFlux: 0,
   spectralFluxSmooth: 0,
 
-  // ── Sensitivity (set by UI, shared with chroma for consistent brightness) ──
-  _sensitivity: -12,
-
-  // ── Chroma / Key / Chord ──
-  chroma: new Float32Array(12),        // 12 pitch-class energies (C, C#, D, ..., B), normalized 0-1
-  detectedKey: '',                     // e.g. "A min", "C maj"
+  // ── Chroma / Key / Chord (owned by chroma module) ──
+  chroma: new Float32Array(12),
+  detectedKey: '',
   detectedKeyConfidence: 0,
-  detectedChord: '',                   // e.g. "Am", "C", "G7"
+  detectedChord: '',
   detectedChordConfidence: 0,
 
-  // ── Timbre (MFCCs + Tristimulus + Inharmonicity) ──
-  mfcc: new Float32Array(13),          // 13 mel-frequency cepstral coefficients
-  tristimulus: new Float32Array(3),    // T1 (fundamental), T2 (H2-H4), T3 (H5+)
-  inharmonicity: 0,                    // deviation of partials from harmonic series
+  // ── Timbre (owned by timbre module) ──
+  mfcc: new Float32Array(13),
+  tristimulus: new Float32Array(3),
+  inharmonicity: 0,
 
-  // ── Speech recognition (Whisper) ──
-  speechText: '',                      // most recent recognized word/phrase
-  speechWords: [],                     // array of { word, start, end, timestamp }
-  speechLoading: true,                 // true while model is loading
+  // ── Speech (owned by speech module) ──
+  speechText: '',
+  speechWords: [],
+  speechLoading: true,
 
-  // ── Note transcription (Basic Pitch) ──
-  activeNotes: [],                     // array of { pitchMidi, startTime, amplitude }
-  noteEvents: [],                      // recent note-on/off events for score strip
-  transcriptionLoading: true,          // true while model is loading
+  // ── Transcription (owned by transcription module) ──
+  activeNotes: [],
+  noteEvents: [],
+  transcriptionLoading: true,
+
+  // ── UI controls ──
+  _sensitivity: -12,
 };

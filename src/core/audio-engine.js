@@ -1,4 +1,7 @@
-// Mic capture, AudioContext, and full-spectrum analyser
+// Core audio engine: mic capture, AudioContext, and full-spectrum analyser.
+// READS: nothing
+// WRITES: creates AudioContext, inputGain node, fullAnalyser node
+// DEPENDS ON: nothing (first in boot sequence)
 
 let audioContext = null;
 let sourceNode = null;
@@ -21,7 +24,6 @@ export async function initAudio() {
   inputGain.gain.value = 1.0;
   sourceNode.connect(inputGain);
 
-  // Full-spectrum analyser for pitch detection, harmonicity, spectral shape
   fullAnalyser = audioContext.createAnalyser();
   fullAnalyser.fftSize = 8192;
   fullAnalyser.smoothingTimeConstant = 0;

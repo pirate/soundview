@@ -1,8 +1,10 @@
 // Beat tracker based on BTrack (Adam Stark, 2014).
-// Uses cumulative score with Gaussian-weighted lookback for tempo estimation.
-// Extracted from spectrum-wall.js so it can be used by both the renderer and tests.
+// READS: store.spectralFlux
+// DEPENDS ON: formants (needs spectralFlux)
+// WRITES: store.bpm, beatPhaseAccuracy, isBeat, beatShowBeats, beatPulse
+// DISPLAY: beat columns spanning all strips, BPM text, beat indicator circle
 
-import { store } from '../store/feature-store.js';
+import { store } from '../../store/feature-store.js';
 
 const BT_BUF_LEN = 512;
 const BT_MIN_LAG = 22;  // ~164 BPM at 60fps
@@ -43,10 +45,12 @@ function btEstimateTempo() {
     }
     btACorrBuf[lag] = corr;
   }
+
   let bestLag = BT_MIN_LAG;
   for (let lag = BT_MIN_LAG + 1; lag <= BT_MAX_LAG; lag++) {
     if (btACorrBuf[lag] > btACorrBuf[bestLag]) bestLag = lag;
   }
+
   // Compound time resolution (6/8, 9/8, 12/8)
   const compoundLag = Math.round(bestLag * 1.5);
   if (compoundLag >= BT_MIN_LAG && compoundLag <= BT_MAX_LAG) {
@@ -55,6 +59,7 @@ function btEstimateTempo() {
       btACorrBuf[compoundLag] > btACorrBuf[compoundLag + 1];
     if (isLocalPeak && btACorrBuf[compoundLag] > btACorrBuf[bestLag] * 0.6) bestLag = compoundLag;
   }
+
   // Double-time: prefer slower tempo
   const doubleLag = bestLag * 2;
   if (doubleLag >= BT_MIN_LAG && doubleLag <= BT_MAX_LAG) {
@@ -64,12 +69,14 @@ function btEstimateTempo() {
       if (isLocalPeak && btACorrBuf[dl] > btACorrBuf[bestLag] * 0.5) bestLag = dl;
     }
   }
+
   // Half-time: prefer faster if strong
   const halfLag = Math.round(bestLag / 2);
   if (halfLag >= BT_MIN_LAG + 2 && halfLag <= BT_MAX_LAG - 2) {
     const isLocalPeak = btACorrBuf[halfLag] > btACorrBuf[halfLag - 1] && btACorrBuf[halfLag] > btACorrBuf[halfLag + 1];
     if (isLocalPeak && btACorrBuf[halfLag] > btACorrBuf[bestLag] * 0.75) bestLag = halfLag;
   }
+
   // Parabolic interpolation
   if (bestLag > BT_MIN_LAG && bestLag < BT_MAX_LAG) {
     const prev = btACorrBuf[bestLag - 1], curr = btACorrBuf[bestLag], next = btACorrBuf[bestLag + 1];
@@ -82,32 +89,10 @@ function btEstimateTempo() {
   return bestLag;
 }
 
-// Reset beat tracker state (e.g. for new analysis run)
-export function resetBeat() {
-  btOdf.fill(0);
-  btCumScore.fill(0);
-  btACorrBuf.fill(0);
-  btIdx = 0;
-  btPeriod = 0;
-  btCounter = 999;
-  btOdfEnergy = 0;
-  btConfirmedBeats = 0;
-  btShowBeats = false;
-  btSilenceTimer = 0;
-  btFrameCount = 0;
-  btBeatCount = 0;
-  btShowBpm = 0;
-  btLastBeatTime = 0;
-  btPhaseAccuracy = 0;
-  btTempoCounter = 0;
-  beatPulse = 0;
-  store.bpm = 0;
-  store.beatPhaseAccuracy = 0;
-}
+export function init() {}
 
-// Call once per frame with the current onset detection function value.
-// Returns { isBeat, bpm, phaseAccuracy, beatPulse } for the renderer.
-export function updateBeat(odfVal, time) {
+export function update(time) {
+  const odfVal = store.spectralFlux;
   btFrameCount++;
 
   btOdf[btIdx] = odfVal;
@@ -188,26 +173,28 @@ export function updateBeat(odfVal, time) {
     btCounter = 999;
   }
 
-  // Decay beat pulse
   beatPulse *= 0.88;
   if (beatPulse < 0.01) beatPulse = 0;
 
   // Update store
-  if (btPeriod > 0) {
-    store.bpm = Math.round(3600 / btPeriod);
-  }
+  if (btPeriod > 0) store.bpm = Math.round(3600 / btPeriod);
   store.beatPhaseAccuracy = btPhaseAccuracy;
   store.isBeat = isBeat;
   store.beatShowBeats = btShowBeats;
   store.beatPulse = beatPulse;
+}
 
-  return {
-    isBeat,
-    bpm: btPeriod > 0 ? Math.round(3600 / btPeriod) : 0,
-    showBeats: btShowBeats,
-    showBpm: isBeat ? btShowBpm : 0,
-    phaseAccuracy: btPhaseAccuracy,
-    beatPulse,
-    frameCount: btFrameCount,
-  };
+export function reset() {
+  btOdf.fill(0);
+  btCumScore.fill(0);
+  btACorrBuf.fill(0);
+  btIdx = 0; btPeriod = 0; btCounter = 999;
+  btOdfEnergy = 0; btConfirmedBeats = 0;
+  btShowBeats = false; btSilenceTimer = 0;
+  btFrameCount = 0; btBeatCount = 0;
+  btShowBpm = 0; btLastBeatTime = 0;
+  btPhaseAccuracy = 0; btTempoCounter = 0;
+  beatPulse = 0;
+  store.bpm = 0;
+  store.beatPhaseAccuracy = 0;
 }
