@@ -34,10 +34,13 @@ let fullAnalyser = null;
 let fullTimeDomain = null;
 let fullFreqData = null;
 let sampleRate = 44100;
+let fftSize = 8192;
 
+// Init for browser mode (with Web Audio AnalyserNode)
 export function initFeatures(analyser, sr) {
   fullAnalyser = analyser;
   sampleRate = sr;
+  fftSize = analyser.fftSize;
   fullTimeDomain = new Float32Array(analyser.fftSize);
   fullFreqData = new Float32Array(analyser.frequencyBinCount);
 
@@ -47,6 +50,58 @@ export function initFeatures(analyser, sr) {
   initFormants(sr, analyser.fftSize);
   initChroma(sr, analyser.fftSize);
   initTimbre(sr, analyser.fftSize);
+}
+
+// Init for offline/test mode (no AnalyserNode needed)
+export function initFeaturesOffline(sr, fft) {
+  fullAnalyser = null;
+  sampleRate = sr;
+  fftSize = fft;
+  fullTimeDomain = new Float32Array(fft);
+  fullFreqData = new Float32Array(fft / 2);
+
+  store.noiseFloor = 0.01;
+
+  initFormants(sr, fft);
+  initChroma(sr, fft);
+  initTimbre(sr, fft);
+}
+
+// Process a frame from raw buffers (no Web Audio API needed).
+// timeDomainData: Float32Array of PCM samples (fftSize length)
+// freqData: Float32Array of dB magnitudes (fftSize/2 length, like getFloatFrequencyData)
+export function updateFeaturesFromBuffers(timeDomainData, freqData) {
+  // Copy into internal buffers
+  fullTimeDomain.set(timeDomainData.subarray(0, fullTimeDomain.length));
+  fullFreqData.set(freqData.subarray(0, fullFreqData.length));
+
+  // Copy spectrum to store
+  for (let i = 0; i < SPECTRUM_BINS && i < fullFreqData.length; i++) {
+    store.spectrumDb[i] = Math.max(-150, fullFreqData[i]);
+  }
+
+  // RMS from time-domain
+  let fullSum = 0;
+  for (let i = 0; i < fullTimeDomain.length; i++) {
+    fullSum += fullTimeDomain[i] * fullTimeDomain[i];
+  }
+  store.rms = Math.sqrt(fullSum / fullTimeDomain.length);
+
+  // Compute spectral centroid/spread from full spectrum (filterbank not available offline)
+  let totalBandEnergy = 0, weightedFreqSum = 0, weightedFreqSqSum = 0;
+  const binHz = sampleRate / fftSize;
+  for (let i = 1; i < freqData.length; i++) {
+    const freq = i * binHz;
+    if (freq < 30 || freq > 20000) continue;
+    const power = Math.pow(10, freqData[i] / 20);
+    totalBandEnergy += power;
+    weightedFreqSum += power * freq;
+    weightedFreqSqSum += power * freq * freq;
+  }
+  store.overallLoudness = store.rms;
+
+  // Run the core analysis pipeline (everything after spectrum loading)
+  _updateCore(totalBandEnergy, weightedFreqSum, weightedFreqSqSum);
 }
 
 export function updateFeatures() {
@@ -143,6 +198,12 @@ export function updateFeatures() {
   }
   store.rms = Math.sqrt(fullSum / fullTimeDomain.length);
 
+  _updateCore(totalBandEnergy, weightedFreqSum, weightedFreqSqSum);
+}
+
+// Core analysis pipeline — pure math, no browser APIs.
+// Called by both updateFeatures (browser) and updateFeaturesFromBuffers (offline).
+function _updateCore(totalBandEnergy, weightedFreqSum, weightedFreqSqSum) {
   // Smooth RMS
   const rmsAlpha = store.rms > store.rmsSmooth ? RMS_SMOOTH_ATTACK : RMS_SMOOTH_RELEASE;
   store.rmsSmooth += rmsAlpha * (store.rms - store.rmsSmooth);
@@ -178,7 +239,7 @@ export function updateFeatures() {
   let totalPower = 0;
   let logPowerSum = 0;
   let validBins = 0;
-  const freqPerBin = sampleRate / (fullAnalyser.fftSize);
+  const freqPerBin = sampleRate / fftSize;
 
   for (let i = 1; i < SPECTRUM_BINS && i < fullFreqData.length; i++) {
     const dbVal = fullFreqData[i];
@@ -269,12 +330,6 @@ export function updateFeatures() {
   // 6. PITCH DETECTION
   // ══════════════════════════════════════════════════
   const pitchResult = detectPitch(fullTimeDomain);
-
-  // Debug: log pitch values every 30 frames
-  if (typeof detectPitch._dbg === 'undefined') detectPitch._dbg = 0;
-  if (++detectPitch._dbg % 30 === 0 && pitchResult.freq > 0) {
-    console.log('pitch:', Math.round(pitchResult.freq), 'Hz, conf:', pitchResult.confidence.toFixed(2), 'pitchSmooth:', Math.round(store.pitchSmooth));
-  }
 
   if (pitchResult.confidence > 0.4 && store.signalPresent) {
     store.pitch = pitchResult.freq;
