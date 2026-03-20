@@ -6,7 +6,6 @@
 import { SPECTRUM_BINS, NUM_BANDS, store } from '../../store/feature-store.js';
 import { cmapLUT, createFreqMapper, FREQ_LO, FREQ_HI, DB_FLOOR, DB_RANGE, GAMMA, BIN_HZ } from '../../core/colormap.js';
 import { detectMultiPitch } from '../harmonics/render.js';
-import { ampThreshold } from '../../core/sensitivity.js';
 
 let freqMapper = null;
 let colImg = null;
@@ -33,7 +32,7 @@ function freqToCanvasY(freqHz, stripY, stripH) {
 }
 
 export function render(ctx, x, y, w, h, env) {
-  const { store: s, sensitivity, CANVAS_H } = env;
+  const { store: s, CANVAS_H } = env;
   const spectrum = s.spectrumDb;
 
   // Lazy init (needs strip height for freq mapper)
@@ -50,7 +49,7 @@ export function render(ctx, x, y, w, h, env) {
   curGamma.fill(0);
   for (let r = 0; r < numRows; r++) {
     const bin = Math.min(SPECTRUM_BINS - 1, freqMapper.rowBins[r]);
-    const raw = (spectrum[bin] + sensitivity - DB_FLOOR) / DB_RANGE;
+    const raw = (spectrum[bin] - DB_FLOOR) / DB_RANGE;
     const gated = Math.max(0, raw - 0.08) / 0.92;
     curGamma[r] = Math.pow(Math.min(1, gated), GAMMA);
   }
@@ -97,7 +96,7 @@ export function render(ctx, x, y, w, h, env) {
     }
 
     // Spectral centroid — pink line
-    if (s.spectralCentroidSmooth > FREQ_LO && s.rmsSmooth > ampThreshold(0.003)) {
+    if (s.spectralCentroidSmooth > FREQ_LO && s.signalPresent) {
       const centroidDelta = prevCentroid > 0
         ? Math.abs(s.spectralCentroidSmooth - prevCentroid) / prevCentroid : 1;
       prevCentroid = s.spectralCentroidSmooth;
@@ -113,7 +112,7 @@ export function render(ctx, x, y, w, h, env) {
     } else { prevCentroid = 0; centroidStable = 0; }
 
     // Spectral rolloff — cyan line
-    if (s.spectralRolloff > FREQ_LO && s.rmsSmooth > ampThreshold(0.005)) {
+    if (s.spectralRolloff > FREQ_LO && s.signalPresent) {
       ctx.fillStyle = 'rgba(0,220,255,0.5)';
       ctx.fillRect(x, Math.round(freqToCanvasY(s.spectralRolloff, y, h)), w, 2);
     }

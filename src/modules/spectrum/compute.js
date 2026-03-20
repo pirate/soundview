@@ -6,6 +6,7 @@
 // DISPLAY: cochleagram strip — scrolling spectrogram with piecewise-log frequency scale
 
 import { NUM_BANDS, SPECTRUM_BINS, store } from '../../store/feature-store.js';
+import { sensitivityDb } from '../../core/sensitivity.js';
 
 let fullAnalyser = null;
 let fullFreqData = null;
@@ -26,9 +27,12 @@ export function update() {
 
   fullAnalyser.getFloatFrequencyData(fullFreqData);
 
-  // Copy spectrum (clamp to avoid -Infinity)
+  // Copy spectrum with sensitivity offset baked in.
+  // Higher sensitivity shifts the spectrum up → quieter bins become visible.
+  // All downstream modules and renderers see the adjusted values.
+  const sensOffset = sensitivityDb() + 12; // 0 at default (-12), positive when boosted
   for (let i = 0; i < SPECTRUM_BINS && i < fullFreqData.length; i++) {
-    store.spectrumDb[i] = Math.max(-150, fullFreqData[i]);
+    store.spectrumDb[i] = Math.max(-150, fullFreqData[i] + sensOffset);
   }
 
   // Spectral shape descriptors from power spectrum

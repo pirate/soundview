@@ -5,7 +5,6 @@
 
 import { SPECTRUM_BINS } from '../../store/feature-store.js';
 import { SAMPLE_RATE, FFT_SIZE } from '../../core/colormap.js';
-import { ampThreshold } from '../../core/sensitivity.js';
 
 const HARM_ROWS = 32;
 const HARM_MAX = 16;
@@ -41,7 +40,7 @@ export function detectMultiPitch(spectrumDb) {
   }
   const peaks = [];
   for (let b = minBin + 1; b < maxBin; b++) {
-    if (scores[b] > scores[b - 1] && scores[b] > scores[b + 1] && scores[b] > ampThreshold(0.0001))
+    if (scores[b] > scores[b - 1] && scores[b] > scores[b + 1] && scores[b] > 0.0001)
       peaks.push({ bin: b, score: scores[b], freq: b * binHz });
   }
   peaks.sort((a, b) => b.score - a.score);

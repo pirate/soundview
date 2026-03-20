@@ -57,7 +57,7 @@ export function update() {
 
   for (let i = 0; i < 12; i++) {
     const db = rawChroma[i] > 1e-15 ? 10 * Math.log10(rawChroma[i]) : -150;
-    const norm = (db + store._sensitivity - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
+    const norm = (db - CHROMA_DB_FLOOR) / CHROMA_DB_RANGE;
     rawChroma[i] = Math.max(0, Math.min(1, norm));
   }
 
