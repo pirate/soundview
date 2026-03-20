@@ -141,6 +141,23 @@ export function getStripLayout(id) {
   return null;
 }
 
+// Pre-allocated env objects to avoid GC pressure (reused every frame)
+const stripEnv = { dt: 0, time: 0, store, scrollSpeed: 0, featGain: 0, sensitivity: 0, frameCount: 0, CANVAS_W: 0, CANVAS_H: 0, SCROLL_W: 0, DPR };
+const overlayEnv = { dt: 0, time: 0, store, scrollSpeed: 0, featGain: 0, sensitivity: 0, frameCount: 0, CANVAS_W: 0, CANVAS_H: 0, SCROLL_W: 0, DPR, getStripLayout, computedLayout: null, strips: null };
+
+function updateEnv(dt, time) {
+  stripEnv.dt = dt; stripEnv.time = time; stripEnv.store = store;
+  stripEnv.scrollSpeed = scrollSpeed; stripEnv.featGain = featGain;
+  stripEnv.sensitivity = sensitivity; stripEnv.frameCount = frameCount;
+  stripEnv.CANVAS_W = CANVAS_W; stripEnv.CANVAS_H = CANVAS_H; stripEnv.SCROLL_W = SCROLL_W;
+
+  overlayEnv.dt = dt; overlayEnv.time = time; overlayEnv.store = store;
+  overlayEnv.scrollSpeed = scrollSpeed; overlayEnv.featGain = featGain;
+  overlayEnv.sensitivity = sensitivity; overlayEnv.frameCount = frameCount;
+  overlayEnv.CANVAS_W = CANVAS_W; overlayEnv.CANVAS_H = CANVAS_H; overlayEnv.SCROLL_W = SCROLL_W;
+  overlayEnv.computedLayout = computedLayout; overlayEnv.strips = strips;
+}
+
 export function renderLoop() {
   if (preRenderHook) preRenderHook();
 
@@ -151,6 +168,7 @@ export function renderLoop() {
   frameCount++;
 
   const rightX = SCROLL_W - scrollSpeed;
+  updateEnv(dt, time);
 
   // Scroll canvas left
   ctx.drawImage(canvas, -scrollSpeed, 0);
@@ -161,23 +179,19 @@ export function renderLoop() {
     if (strips[i].enabled === false) continue;
     const { y, h } = computedLayout[i];
     if (strips[i].render) {
-      strips[i].render(ctx, rightX, y, scrollSpeed, h, { dt, time, store, scrollSpeed, featGain, sensitivity, frameCount, CANVAS_W, CANVAS_H, SCROLL_W, DPR });
+      strips[i].render(ctx, rightX, y, scrollSpeed, h, stripEnv);
     }
   }
 
   // Post-strip renderers (on scrolling canvas, after all strips — e.g. beat columns)
-  const env = { dt, time, store, scrollSpeed, featGain, sensitivity, frameCount, CANVAS_W, CANVAS_H, SCROLL_W, DPR };
   for (const psr of postStripRenderers) {
-    if (psr.render) psr.render(ctx, rightX, CANVAS_H, env);
+    if (psr.render) psr.render(ctx, rightX, CANVAS_H, stripEnv);
   }
 
   // Clear overlay and render overlays
   oCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
   for (const ov of overlayRenderers) {
-    if (ov.render) {
-      ov.render(oCtx, { dt, time, store, scrollSpeed, featGain, sensitivity, frameCount,
-                         CANVAS_W, CANVAS_H, SCROLL_W, DPR, getStripLayout, computedLayout, strips });
-    }
+    if (ov.render) ov.render(oCtx, overlayEnv);
   }
 
   requestAnimationFrame(renderLoop);

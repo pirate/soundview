@@ -8,7 +8,8 @@ import { cmapLUT, createFreqMapper, FREQ_LO, FREQ_HI, DB_FLOOR, DB_RANGE, GAMMA,
 import { detectMultiPitch } from '../harmonics/render.js';
 
 let freqMapper = null;
-let colImg = null;
+let stripImg = null; // wide ImageData (scrollSpeed × h), reused each frame
+let stripImgW = 0;
 let prevGamma = null, curGamma = null;
 let noiseGateSmooth = 0, prevCentroid = 0, centroidStable = 0;
 let brightBinAvg = 0, transientCooldown = 0;
@@ -38,37 +39,43 @@ export function render(ctx, x, y, w, h, env) {
   // Lazy init (needs strip height for freq mapper)
   if (!freqMapper || freqMapper.numRows !== h) {
     freqMapper = createFreqMapper(h);
-    colImg = ctx.createImageData(1, h);
     prevGamma = new Float32Array(h);
     curGamma = new Float32Array(h);
+    stripImg = null; // force re-create
+  }
+
+  // Re-create ImageData if scroll width changed
+  if (!stripImg || stripImgW !== w) {
+    stripImg = ctx.createImageData(w, h);
+    stripImgW = w;
   }
 
   const numRows = h;
+  const rowBins = freqMapper.rowBins;
 
   // Compute gamma-corrected column
-  curGamma.fill(0);
   for (let r = 0; r < numRows; r++) {
-    const bin = Math.min(SPECTRUM_BINS - 1, freqMapper.rowBins[r]);
+    const bin = Math.min(SPECTRUM_BINS - 1, rowBins[r]);
     const raw = (spectrum[bin] - DB_FLOOR) / DB_RANGE;
     const gated = Math.max(0, raw - 0.08) / 0.92;
     curGamma[r] = Math.pow(Math.min(1, gated), GAMMA);
   }
 
-  // Draw interpolated columns
+  // Fill the wide ImageData in one pass, then single putImageData call
+  const data = stripImg.data;
   for (let px = 0; px < w; px++) {
     const t = w > 1 ? px / (w - 1) : 1;
-    const data = colImg.data;
     for (let r = 0; r < numRows; r++) {
       const g = prevGamma[r] + (curGamma[r] - prevGamma[r]) * t;
       const cidx = Math.max(0, Math.min(255, Math.round(g * 255))) * 3;
-      const pixIdx = (numRows - r - 1) * 4;
+      const pixIdx = ((numRows - r - 1) * w + px) * 4;
       data[pixIdx] = cmapLUT[cidx];
       data[pixIdx + 1] = cmapLUT[cidx + 1];
       data[pixIdx + 2] = cmapLUT[cidx + 2];
       data[pixIdx + 3] = 255;
     }
-    ctx.putImageData(colImg, x + px, y);
   }
+  ctx.putImageData(stripImg, x, y);
   prevGamma.set(curGamma);
 
   // Overlays on the cochleagram
@@ -145,10 +152,9 @@ export function render(ctx, x, y, w, h, env) {
     const hiI = Math.min(1, hiE * gs);
     const fuzzRowH = Math.round(h * 0.05);
     if (hiI > 0.05) {
-      const n = Math.round(hiI * 40 * w);
+      const n = Math.min(20, Math.round(hiI * 40 * w)); // cap pixel count
+      ctx.fillStyle = `rgba(120,230,250,${(0.5 * hiI).toFixed(2)})`;
       for (let p = 0; p < n; p++) {
-        const a = (0.3 + Math.random() * 0.5) * hiI;
-        ctx.fillStyle = `rgba(120,230,250,${a})`;
         ctx.fillRect(x + Math.floor(Math.random() * w), y + Math.floor(Math.random() * fuzzRowH), 4, 4);
       }
     }
@@ -176,7 +182,7 @@ export function renderOverlay(oCtx, env) {
   if (!layout || !freqMapper) return;
   const { y, h } = layout;
 
-  const voices = s.signalPresent ? detectMultiPitch(s.spectrumDb) : [];
+  const voices = s.signalPresent ? detectMultiPitch(s.spectrumDb, env.frameCount) : [];
   const ARROW_W = Math.round(CANVAS_W * 0.047);
   const fontSize = Math.round(CANVAS_H * 0.01);
   const textZoneW = Math.round(fontSize * 4);

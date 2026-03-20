@@ -38,10 +38,10 @@ startBtn.addEventListener('click', async () => {
 
     // 3. Strip layout (top to bottom) — reorder these to rearrange the display
     setStrips([
-      { id: 'speech',    label: 'speech',     height: 0.05, render: speechRender.render, buildLabels: null },
+      { id: 'speech',    label: 'speech',     height: 0.08, render: speechRender.render, buildLabels: null },
       { id: 'timbre',    label: 'timbre',     height: 0.07, render: timbreRender.render, buildLabels: null },
-      { id: 'chroma',    label: 'notes',      height: 0.10, render: chromaRender.render, buildLabels: null },
-      { id: 'onset',     label: 'onset/flux', height: 0.07, render: onsetRender.render, buildLabels: null },
+      { id: 'chroma',    label: 'notes',      height: 0.14, render: chromaRender.render, buildLabels: null },
+      { id: 'onset',     label: 'onset/flux', height: 0.07, render: onsetRender.render, buildLabels: null, enabled: false },
       { id: 'harmonics', label: 'harmonics',  height: 0.14, render: harmonicsRender.render, buildLabels: null },
       { id: 'spectrum',  label: null,          height: 0.50, render: spectrumRender.render, buildLabels: spectrumRender.buildLabels },
       { id: 'energy',    label: 'volume',     height: 0.06, render: energyRender.render, buildLabels: null },

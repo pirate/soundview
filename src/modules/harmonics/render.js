@@ -13,11 +13,13 @@ let prevDomY = -1, prevDomRow = -1, domStableFrames = 0;
 
 export const meta = { id: 'harmonics', label: 'harmonics', defaultHeight: 0.14, type: 'strip' };
 
-// Multi-voice pitch detection (subharmonic summation)
+// Multi-voice pitch detection (subharmonic summation) with per-frame cache
 const MAX_VOICES = 4;
 let _dmpScores = null, _dmpBinHz, _dmpMinBin, _dmpMaxBin;
+let _dmpCacheFrame = -1, _dmpCacheResult = [];
 
-export function detectMultiPitch(spectrumDb) {
+export function detectMultiPitch(spectrumDb, frameCount) {
+  if (frameCount !== undefined && frameCount === _dmpCacheFrame) return _dmpCacheResult;
   if (!_dmpScores) {
     _dmpBinHz = SAMPLE_RATE / FFT_SIZE;
     _dmpMinBin = Math.floor(60 / _dmpBinHz);
@@ -56,6 +58,7 @@ export function detectMultiPitch(spectrumDb) {
     }
     if (!isHarmonic) voices.push({ freq: peak.freq, strength: peak.score });
   }
+  if (frameCount !== undefined) { _dmpCacheFrame = frameCount; _dmpCacheResult = voices; }
   return voices;
 }
 
@@ -65,7 +68,7 @@ export function render(ctx, x, y, w, h, env) {
   const binHz = SAMPLE_RATE / FFT_SIZE;
 
   let f0 = s.pitchSmooth > 0 ? s.pitchSmooth : 0;
-  const voices = s.signalPresent ? detectMultiPitch(spectrum) : [];
+  const voices = s.signalPresent ? detectMultiPitch(spectrum, env.frameCount) : [];
   if (f0 === 0 && voices.length > 0) f0 = voices[0].freq;
 
   let dominantRow = -1, dominantAmp = 0;
