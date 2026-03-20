@@ -3,7 +3,7 @@
 //        spectralRolloff, harmonicAmplitudes, harmonicity, bandEnergySmooth, rmsSmooth, signalPresent
 // DISPLAY: scrolling spectrogram with piecewise-log frequency scale, plus overlay lines
 
-import { SPECTRUM_BINS, NUM_BANDS, store } from '../../store/feature-store.js';
+import { SPECTRUM_BINS, NUM_BANDS } from '../../store/feature-store.js';
 import { cmapLUT, createFreqMapper, FREQ_LO, FREQ_HI, DB_FLOOR, DB_RANGE, GAMMA, BIN_HZ } from '../../core/colormap.js';
 import { detectMultiPitch } from '../harmonics/render.js';
 

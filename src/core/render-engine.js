@@ -62,7 +62,7 @@ export function initRenderer() {
   overlay.width = CANVAS_W;
   overlay.height = CANVAS_H;
   overlay.id = 'spectrogram-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;pointer-events:none';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2;pointer-events:none;image-rendering:auto';
   document.body.appendChild(overlay);
 
   oCtx = overlay.getContext('2d');
