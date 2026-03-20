@@ -5,6 +5,7 @@
 // DISPLAY: harmonics strip — 32 harmonic rows colored by harmonic number
 
 import { SPECTRUM_BINS, store } from '../../store/feature-store.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 let sampleRate = 44100;
 let fftSize = 8192;
@@ -18,7 +19,7 @@ export function update() {
   store.harmonicity = 0;
   store.harmonicAmplitudes.fill(0);
 
-  if (store.pitch <= 0 || store.pitchConfidence <= 0.3) return;
+  if (store.pitch <= 0 || store.pitchConfidence <= ampThreshold(0.3)) return;
 
   const f0 = store.pitch;
   const binWidth = sampleRate / fftSize;

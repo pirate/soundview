@@ -6,6 +6,7 @@
 import { SPECTRUM_BINS, NUM_BANDS, store } from '../../store/feature-store.js';
 import { cmapLUT, createFreqMapper, FREQ_LO, FREQ_HI, DB_FLOOR, DB_RANGE, GAMMA, BIN_HZ } from '../../core/colormap.js';
 import { detectMultiPitch } from '../harmonics/render.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 let freqMapper = null;
 let colImg = null;
@@ -96,7 +97,7 @@ export function render(ctx, x, y, w, h, env) {
     }
 
     // Spectral centroid — pink line
-    if (s.spectralCentroidSmooth > FREQ_LO && s.rmsSmooth > 0.003) {
+    if (s.spectralCentroidSmooth > FREQ_LO && s.rmsSmooth > ampThreshold(0.003)) {
       const centroidDelta = prevCentroid > 0
         ? Math.abs(s.spectralCentroidSmooth - prevCentroid) / prevCentroid : 1;
       prevCentroid = s.spectralCentroidSmooth;
@@ -112,7 +113,7 @@ export function render(ctx, x, y, w, h, env) {
     } else { prevCentroid = 0; centroidStable = 0; }
 
     // Spectral rolloff — cyan line
-    if (s.spectralRolloff > FREQ_LO && s.rmsSmooth > 0.005) {
+    if (s.spectralRolloff > FREQ_LO && s.rmsSmooth > ampThreshold(0.005)) {
       ctx.fillStyle = 'rgba(0,220,255,0.5)';
       ctx.fillRect(x, Math.round(freqToCanvasY(s.spectralRolloff, y, h)), w, 2);
     }

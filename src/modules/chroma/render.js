@@ -5,6 +5,7 @@
 //          circle of fifths widget (bottom-left above timbre space)
 
 import { PITCH_CLASS_COLORS, NOTE_LABELS } from '../../core/colormap.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 const NOTE_ROWS = 12;
 const chordNotes = new Uint8Array(12);
@@ -70,7 +71,7 @@ export function render(ctx, x, y, w, h, env) {
     const [cR, cG, cB] = PITCH_CLASS_COLORS[row];
     const yTop = y + Math.round((NOTE_ROWS - 1 - row) / NOTE_ROWS * h);
     const yBot = y + Math.round((NOTE_ROWS - row) / NOTE_ROWS * h);
-    const noteOn = energy > 0.15 && s.signalPresent;
+    const noteOn = energy > ampThreshold(0.15) && s.signalPresent;
 
     if (noteOn && isChordTone) {
       const v = Math.min(1, energy * 1.5);

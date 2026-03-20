@@ -5,6 +5,7 @@
 // DISPLAY: onset/flux strip — spectral flux line + onset markers
 
 import { NUM_BANDS, store } from '../../store/feature-store.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 const prevEnergy = new Float32Array(NUM_BANDS);
 let onsetMedian = 0;
@@ -25,7 +26,7 @@ export function update() {
   }
 
   onsetMedian += 0.02 * (flux - onsetMedian);
-  const threshold = onsetMedian * 2.0 + 0.005;
+  const threshold = onsetMedian * 2.0 + ampThreshold(0.005);
 
   store.onsetStrength = Math.min(flux / (threshold + 0.001), 1.0);
   store.isOnset = flux > threshold && store.signalPresent;
@@ -36,7 +37,7 @@ export function update() {
       : store.spectralCentroid;
     let activeBands = 0;
     for (let i = 0; i < NUM_BANDS; i++) {
-      if (store.bandEnergy[i] - prevEnergy[i] > 0.001) activeBands++;
+      if (store.bandEnergy[i] - prevEnergy[i] > ampThreshold(0.001)) activeBands++;
     }
     store.onsetBandwidth = activeBands / NUM_BANDS;
   }

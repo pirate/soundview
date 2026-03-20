@@ -3,12 +3,15 @@
 // DISPLAY: scrolling strip colored by tristimulus, centroid line, MFCC[1] line;
 //          bottom-left timbre space widget (centroid vs MFCC[1] scatter plot)
 
+import { ampThreshold } from '../../core/sensitivity.js';
+
 const TRAIL_LEN = 120;
 
-// MFCC adaptive normalization
-const mfccMin = new Float32Array(13).fill(0);
-const mfccMax = new Float32Array(13).fill(1);
-let mfccInitFrames = 0;
+// MFCC normalization — fixed range calibrated for typical audio.
+// MFCC[1] (spectral tilt) typically ranges from about -30 to +10.
+// The sensitivity slider shifts these bounds so the display adapts to the user's level.
+const MFCC1_BASE_MIN = -30;
+const MFCC1_BASE_MAX = 10;
 
 // Timbre space trail
 const timbreTrailX = new Float32Array(TRAIL_LEN);
@@ -20,8 +23,14 @@ let trailIdx = 0, trailCount = 0;
 
 export const meta = { id: 'timbre', label: 'timbre', defaultHeight: 0.07, type: 'strip' };
 
+function mfcc1Norm(value, sensitivity) {
+  const floor = MFCC1_BASE_MIN + sensitivity;
+  const range = MFCC1_BASE_MAX - MFCC1_BASE_MIN;
+  return Math.max(0, Math.min(1, (value - floor) / range));
+}
+
 export function render(ctx, x, y, w, h, env) {
-  const { store: s, featGain } = env;
+  const { store: s, featGain, sensitivity } = env;
 
   const eB = Math.min(1, s.rmsSmooth * featGain * 0.5);
   const tR = Math.round(s.tristimulus[0] * 255 * eB);
@@ -38,17 +47,16 @@ export function render(ctx, x, y, w, h, env) {
     ctx.fillRect(x, Math.round(cy) - 1, w, 2);
   }
 
-  // MFCC[1] line
-  const m1range = mfccMax[1] - mfccMin[1];
-  if (m1range > 1e-6 && s.signalPresent) {
-    const m1norm = (s.mfcc[1] - mfccMin[1]) / m1range;
+  // MFCC[1] line (sensitivity-scaled, no auto-gain)
+  if (s.signalPresent) {
+    const m1norm = mfcc1Norm(s.mfcc[1], sensitivity);
     const my = y + (1 - m1norm) * h;
     ctx.fillStyle = 'rgba(255,200,100,0.5)';
     ctx.fillRect(x, Math.round(my), w, 2);
   }
 
   // Inharmonicity indicator
-  if (s.inharmonicity > 0.01) {
+  if (s.inharmonicity > ampThreshold(0.01)) {
     const barH = Math.round(Math.min(1, s.inharmonicity * 8) * h * 0.15);
     ctx.fillStyle = `rgba(255,100,0,${Math.min(0.7, s.inharmonicity * 4)})`;
     ctx.fillRect(x, y, w, barH);
@@ -57,7 +65,7 @@ export function render(ctx, x, y, w, h, env) {
 
 // Overlay: timbre space widget (bottom-left)
 export function renderOverlay(oCtx, env) {
-  const { store: s, CANVAS_W, CANVAS_H, DPR } = env;
+  const { store: s, CANVAS_W, CANVAS_H, DPR, sensitivity } = env;
 
   const TIMBRE_SZ = Math.round(Math.min(CANVAS_H * 0.09, CANVAS_W * 0.10));
   const pad = Math.round(8 * DPR);
@@ -77,30 +85,15 @@ export function renderOverlay(oCtx, env) {
   oCtx.moveTo(cx, boxY); oCtx.lineTo(cx, boxY + boxH);
   oCtx.stroke();
 
-  // MFCC adaptive normalization
-  mfccInitFrames++;
-  for (let k = 0; k < 13; k++) {
-    const v = s.mfcc[k];
-    if (mfccInitFrames < 30) {
-      mfccMin[k] = Math.min(mfccMin[k], v);
-      mfccMax[k] = Math.max(mfccMax[k], v);
-    } else {
-      mfccMin[k] += 0.002 * (v - mfccMin[k]);
-      mfccMax[k] -= 0.002 * (mfccMax[k] - v);
-      mfccMin[k] = Math.min(mfccMin[k], v);
-      mfccMax[k] = Math.max(mfccMax[k], v);
-    }
-  }
-
+  // Map timbre position using sensitivity-scaled normalization (no auto-gain)
   const centroidLog = s.spectralCentroidSmooth > 0
     ? Math.log(Math.max(200, Math.min(8000, s.spectralCentroidSmooth)) / 200) / Math.log(8000 / 200)
     : 0.5;
-  const mfcc1range = mfccMax[1] - mfccMin[1];
-  const mfcc1norm = mfcc1range > 1e-6 ? (s.mfcc[1] - mfccMin[1]) / mfcc1range : 0.5;
+  const m1norm = mfcc1Norm(s.mfcc[1], sensitivity);
   const dotX = boxX + centroidLog * boxW;
-  const dotY = boxY + (1 - mfcc1norm) * boxH;
+  const dotY = boxY + (1 - m1norm) * boxH;
 
-  if (s.signalPresent && s.rmsSmooth > 0.003) {
+  if (s.signalPresent && s.rmsSmooth > ampThreshold(0.003)) {
     timbreTrailX[trailIdx] = dotX; timbreTrailY[trailIdx] = dotY;
     timbreTrailR[trailIdx] = Math.round(s.tristimulus[0] * 255);
     timbreTrailG[trailIdx] = Math.round(s.tristimulus[1] * 255);
@@ -119,7 +112,7 @@ export function renderOverlay(oCtx, env) {
     oCtx.fillRect(timbreTrailX[idx] - sz / 2, timbreTrailY[idx] - sz / 2, sz, sz);
   }
 
-  if (s.signalPresent && s.rmsSmooth > 0.003) {
+  if (s.signalPresent && s.rmsSmooth > ampThreshold(0.003)) {
     const tR = Math.min(255, Math.round(s.tristimulus[0] * 300 + 60));
     const tG = Math.min(255, Math.round(s.tristimulus[1] * 300 + 60));
     const tB = Math.min(255, Math.round(s.tristimulus[2] * 300 + 60));
@@ -141,7 +134,7 @@ export function renderOverlay(oCtx, env) {
   oCtx.fillText('warm →', 0, 0);
   oCtx.restore();
 
-  if (s.inharmonicity > 0.001) {
+  if (s.inharmonicity > ampThreshold(0.001)) {
     const barW = Math.round(Math.min(1, s.inharmonicity * 10) * boxW);
     oCtx.fillStyle = `rgba(255,160,40,${Math.min(0.8, s.inharmonicity * 5)})`;
     oCtx.fillRect(boxX, boxY + boxH - 3, barW, 3);

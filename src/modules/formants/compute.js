@@ -7,6 +7,7 @@
 // DISPLAY: green formant lines overlaid on cochleagram
 
 import { SPECTRUM_BINS, NUM_BANDS, store } from '../../store/feature-store.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 let sampleRate = 44100;
 let fftSize = 8192;
@@ -109,13 +110,13 @@ export function update() {
   store.formant3Smooth = smoothFormant(store.formant3Smooth, f3Raw);
 
   // Sound classification
-  if (store.isOnset && store.onsetBandwidth > 0.3 && store.spectralFlux > 0.15) {
+  if (store.isOnset && store.onsetBandwidth > 0.3 && store.spectralFlux > ampThreshold(0.15)) {
     store.soundClass = 4; store._plosiveHold = 6;
   } else if (store._plosiveHold > 0) {
     store._plosiveHold--; store.soundClass = 4;
   } else if (!store.signalPresent) {
     store.soundClass = 0;
-  } else if (store.pitchConfidence < 0.2 && store.spectralFlatness > 0.08) {
+  } else if (store.pitchConfidence < ampThreshold(0.2) && store.spectralFlatness > 0.08) {
     store.soundClass = 3;
   } else if (store.pitchConfidence > 0.25) {
     const lowCutBand = Math.floor(NUM_BANDS * 0.35);

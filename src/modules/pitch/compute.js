@@ -6,6 +6,7 @@
 
 import { HISTORY_LEN, store } from '../../store/feature-store.js';
 import { getTimeDomain } from '../energy/compute.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 const MIN_FREQ = 60;
 const MAX_FREQ = 800;
@@ -83,7 +84,7 @@ export function update() {
 
   const result = detectPitch(timeDomain);
 
-  if (result.confidence > 0.4 && store.signalPresent) {
+  if (result.confidence > ampThreshold(0.4) && store.signalPresent) {
     store.pitch = result.freq;
     store.pitchConfidence = result.confidence;
   } else {
@@ -92,7 +93,7 @@ export function update() {
   }
 
   // Smooth pitch for display
-  if (store.pitch > 0 && store.pitchConfidence > 0.3) {
+  if (store.pitch > 0 && store.pitchConfidence > ampThreshold(0.3)) {
     if (store.pitchSmooth === 0) {
       store.pitchSmooth = store.pitch;
     } else {

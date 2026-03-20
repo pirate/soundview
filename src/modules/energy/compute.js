@@ -9,6 +9,7 @@
 
 import { NUM_BANDS, HISTORY_LEN, store } from '../../store/feature-store.js';
 import { bands } from '../../core/filterbank.js';
+import { snrThreshold } from '../../core/sensitivity.js';
 
 const SMOOTH_ATTACK = 0.3;
 const SMOOTH_RELEASE = 0.06;
@@ -114,7 +115,7 @@ export function update() {
   }
   store.noiseFloor = Math.max(store.noiseFloor, 1e-5);
   store.signalAboveNoise = store.rms / (store.noiseFloor + 1e-8);
-  store.signalPresent = store.signalAboveNoise > 2.0;
+  store.signalPresent = store.signalAboveNoise > snrThreshold(2.0);
 
   // Modulation depth + rate (envelope fluctuation over ~1s)
   envelopeHistory[envHistIdx] = store.rmsSmooth;

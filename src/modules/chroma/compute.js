@@ -7,6 +7,7 @@
 // DISPLAY: notes/chords strip — 12-row piano roll with pitch-class coloring + circle of fifths overlay
 
 import { SPECTRUM_BINS, store } from '../../store/feature-store.js';
+import { dbFloor } from '../../core/sensitivity.js';
 
 const CHROMA_DB_FLOOR = -80;
 const CHROMA_DB_RANGE = 60;
@@ -46,7 +47,7 @@ export function update() {
   const maxBin = Math.min(numBins - 1, Math.floor(5000 / binHz));
 
   for (let i = minBin; i <= maxBin; i++) {
-    if (store.spectrumDb[i] < -90) continue;
+    if (store.spectrumDb[i] < dbFloor(-90)) continue;
     const freq = i * binHz;
     const power = Math.pow(10, store.spectrumDb[i] / 10);
     const midi = 12 * Math.log2(freq / 440) + 69;

@@ -5,6 +5,7 @@
 // DISPLAY: timbre-over-time strip (tristimulus color + centroid line) + timbre space overlay
 
 import { SPECTRUM_BINS, store } from '../../store/feature-store.js';
+import { ampThreshold } from '../../core/sensitivity.js';
 
 const NUM_MEL_BANDS = 26;
 const NUM_MFCC = 13;
@@ -82,7 +83,7 @@ export function update() {
 
   // Tristimulus
   const rawAmps = store.harmonicAmplitudesRaw;
-  if (store.pitch > 0 && store.pitchConfidence > 0.3) {
+  if (store.pitch > 0 && store.pitchConfidence > ampThreshold(0.3)) {
     let total = 0;
     for (let h = 0; h < 32; h++) total += rawAmps[h];
     if (total > 1e-6) {
@@ -99,7 +100,7 @@ export function update() {
   }
 
   // Inharmonicity
-  if (store.pitch > 0 && store.pitchConfidence > 0.3) {
+  if (store.pitch > 0 && store.pitchConfidence > ampThreshold(0.3)) {
     const f0 = store.pitch;
     const binHz = sampleRate / fftSize;
     let totalDev = 0, totalW = 0;
